@@ -1,0 +1,1 @@
+package com.malison.catalogui.model; import lombok.*; import java.time.Instant; @Data @Builder @NoArgsConstructor @AllArgsConstructor public class OrderResponse { private long id; private long productId; private int quantity; private double price; private double totalAmount; private Instant orderDate; private String orderStatus; }

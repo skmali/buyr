@@ -1,0 +1,1 @@
+package com.malison.catalogui.model; import lombok.*; @Data @Builder @NoArgsConstructor @AllArgsConstructor public class OrderRequest { private long productId; private int quantity; private double price; }
