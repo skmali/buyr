@@ -28,10 +28,11 @@ All inter-service calls go through Eureka via a `@LoadBalanced RestTemplate` and
 
 Requires **JDK 17** (Lombok in this Spring Boot 3.3.4 setup does not support newer JDKs like 26) and Docker for Postgres/Redis:
 
+\`\`\`
 docker run -d --name buyr-postgres -e POSTGRES_DB=catalogdb -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16-alpine
 docker run -d --name buyr-redis -p 6379:6379 redis:7-alpine
 
 ./mvnw clean install
 # then run each module's jar, starting with service-registry
-
-
+\`\`\`
+```
