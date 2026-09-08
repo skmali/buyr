@@ -11,7 +11,7 @@ Maven multi-module monorepo with five services, all registering with and discove
 | service-registry | 8761 | Eureka service discovery | — |
 | catalog-service | 8080 | Product catalog, stock management, UPC lookup | PostgreSQL + Redis |
 | cart-service | 8082 | Shopping cart | Redis |
-| order-service | 8083 | Order placement and history | H2 (in-memory) |
+| order-service | 8083 | Order placement and history | PostgreSQL |
 | catalog-ui | 8081 | Thymeleaf/HTMX storefront UI | — |
 
 All inter-service calls go through Eureka via a `@LoadBalanced RestTemplate` and logical service names (e.g. `http://CatalogService/...`) — no hardcoded hosts.
@@ -31,6 +31,10 @@ Requires **JDK 17** (Lombok in this Spring Boot 3.3.4 setup does not support new
 
 docker run -d --name buyr-postgres -e POSTGRES_DB=catalogdb -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16-alpine
 docker run -d --name buyr-redis -p 6379:6379 redis:7-alpine
+
+catalog-service and order-service each own their own database on the same Postgres instance — create the second one:
+
+docker exec buyr-postgres psql -U postgres -c "CREATE DATABASE orderdb;"
 
 ./mvnw clean install -DskipTests
 then run each module's jar, starting with service-registry
