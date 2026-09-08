@@ -2,11 +2,16 @@ package com.malison.cartservice.controller;
 
 import com.malison.cartservice.model.Cart;
 import com.malison.cartservice.model.CartItem;
+import com.malison.cartservice.model.ProductResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
 
@@ -16,11 +21,17 @@ import java.util.ArrayList;
 public class CartController {
 
     private final RedisTemplate<String, Cart> redisTemplate;
+    private final RestTemplate restTemplate;
+    private final String catalogServiceUrl;
     private static final String CART_PREFIX = "cart:";
 
     @Autowired
-    public CartController(RedisTemplate<String, Cart> redisTemplate) {
+    public CartController(RedisTemplate<String, Cart> redisTemplate,
+                           RestTemplate restTemplate,
+                           @Value("${catalog-service.url:http://CatalogService/api/product}") String catalogServiceUrl) {
         this.redisTemplate = redisTemplate;
+        this.restTemplate = restTemplate;
+        this.catalogServiceUrl = catalogServiceUrl;
     }
 
     @GetMapping("/{cartId}")
@@ -37,6 +48,20 @@ public class CartController {
     @PostMapping("/{cartId}/add")
     public ResponseEntity<Cart> addToCart(@PathVariable String cartId, @RequestBody CartItem newItem) {
         log.info("Adding item to cart {}: {}", cartId, newItem);
+
+        ProductResponse product;
+        try {
+            product = restTemplate.getForObject(catalogServiceUrl + "/" + newItem.getProductId(), ProductResponse.class);
+        } catch (RestClientException e) {
+            log.error("Failed to fetch product {} from CatalogService: {}", newItem.getProductId(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+        if (product == null) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+        newItem.setProductName(product.getName());
+        newItem.setPrice(product.getPrice());
+
         String key = CART_PREFIX + cartId;
         Cart cart = redisTemplate.opsForValue().get(key);
         if (cart == null) {

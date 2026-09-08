@@ -4,13 +4,17 @@ import com.malison.catalogservice.entity.Product;
 import com.malison.catalogservice.exception.ProductServiceException;
 import com.malison.catalogservice.model.ProductRequest;
 import com.malison.catalogservice.model.ProductResponse;
+import com.malison.catalogservice.model.UpcLookupResponse;
+import com.malison.catalogservice.model.external.UpcItemDbResponse;
 import com.malison.catalogservice.repository.ProductRepository;
 import com.malison.catalogservice.service.ProductService;
 import com.malison.catalogservice.pubsub.ProductMessagePublisher;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import static org.springframework.beans.BeanUtils.*;
 
@@ -20,11 +24,18 @@ public class ProductServiceImpl implements ProductService {
 
     private final ProductRepository productRepository;
     private final ProductMessagePublisher productMessagePublisher;
+    private final RestTemplate restTemplate;
+    private final String upcLookupUrl;
 
     @Autowired
-    public ProductServiceImpl(ProductRepository productRepository, ProductMessagePublisher productMessagePublisher) {
+    public ProductServiceImpl(ProductRepository productRepository,
+                               ProductMessagePublisher productMessagePublisher,
+                               RestTemplate restTemplate,
+                               @Value("${upc-lookup.url:https://api.upcitemdb.com/prod/trial/lookup}") String upcLookupUrl) {
         this.productRepository = productRepository;
         this.productMessagePublisher = productMessagePublisher;
+        this.restTemplate = restTemplate;
+        this.upcLookupUrl = upcLookupUrl;
     }
 
 
@@ -94,5 +105,42 @@ public class ProductServiceImpl implements ProductService {
         } catch (Exception e) {
             log.error("Failed to publish stock update to Redis: {}", e.getMessage());
         }
+    }
+
+    @Override
+    public UpcLookupResponse lookupUpc(String code) {
+        log.info("Looking up UPC {} against external product database", code);
+        try {
+            String url = upcLookupUrl + "?upc=" + code;
+            UpcItemDbResponse response = restTemplate.getForObject(url, UpcItemDbResponse.class);
+            if (response != null && "OK".equals(response.getCode())
+                    && response.getItems() != null && !response.getItems().isEmpty()) {
+                UpcItemDbResponse.Item item = response.getItems().get(0);
+                String description = (item.getDescription() != null && !item.getDescription().isBlank())
+                        ? item.getDescription()
+                        : (item.getBrand() != null ? item.getBrand() : "");
+                double price = item.getLowestRecordedPrice() != null ? item.getLowestRecordedPrice() : 0.0;
+
+                log.info("UPC lookup found a match for {}: {}", code, item.getTitle());
+                return UpcLookupResponse.builder()
+                        .found(true)
+                        .name(truncate(item.getTitle(), 255))
+                        .description(truncate(description, 2000))
+                        .price(price)
+                        .quantity(10)
+                        .build();
+            }
+            log.info("UPC lookup found no match for {}", code);
+        } catch (Exception e) {
+            log.error("UPC lookup failed for {}: {}", code, e.getMessage());
+        }
+        return UpcLookupResponse.builder().found(false).build();
+    }
+
+    private static String truncate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
     }
 }

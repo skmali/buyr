@@ -2,6 +2,7 @@ package com.malison.catalogservice.controller;
 
 import com.malison.catalogservice.model.ProductRequest;
 import com.malison.catalogservice.model.ProductResponse;
+import com.malison.catalogservice.model.UpcLookupResponse;
 import com.malison.catalogservice.service.ProductService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -43,5 +44,11 @@ public class ProductController {
     public ResponseEntity<Void> reduceQuantity(@PathVariable("id") Long id, @RequestParam("quantity") int quantity) {
         productService.reduceQuantity(id, quantity);
         return new ResponseEntity<>(HttpStatus.OK);
+    }
+
+    @GetMapping("/lookup-upc/{code}")
+    public ResponseEntity<UpcLookupResponse> lookupUpc(@PathVariable("code") String code) {
+        UpcLookupResponse result = productService.lookupUpc(code);
+        return new ResponseEntity<>(result, HttpStatus.OK);
     }
 }

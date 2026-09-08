@@ -34,6 +34,9 @@ eureka:
   instance:
     prefer-ip-address: true
 
+upc-lookup:
+  url: https://api.upcitemdb.com/prod/trial/lookup
+
 ---
 spring:
   config:

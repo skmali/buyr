@@ -6,6 +6,7 @@ import com.malison.catalogui.model.OrderRequest;
 import com.malison.catalogui.model.OrderResponse;
 import com.malison.catalogui.model.ProductRequest;
 import com.malison.catalogui.model.ProductResponse;
+import com.malison.catalogui.model.UpcLookupResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -114,6 +115,21 @@ public class ProductUiController {
         Cart updatedCart = getCartFromService();
         model.addAttribute("cart", updatedCart);
         return "fragments/product-row :: cart-sidebar";
+    }
+
+    @GetMapping("/products/lookup-upc/{code}")
+    @ResponseBody
+    public UpcLookupResponse lookupUpc(@PathVariable String code) {
+        log.info("UI request: look up UPC {} via CatalogService", code);
+        try {
+            UpcLookupResponse result = restTemplate.getForObject(backendUrl + "/lookup-upc/" + code, UpcLookupResponse.class);
+            if (result != null) {
+                return result;
+            }
+        } catch (Exception e) {
+            log.error("UPC lookup proxy failed for {}: {}", code, e.getMessage());
+        }
+        return UpcLookupResponse.builder().found(false).build();
     }
 
     @DeleteMapping("/cart/remove/{productId}")

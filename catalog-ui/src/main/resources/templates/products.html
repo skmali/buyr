@@ -272,6 +272,10 @@
                     <i class="fa-solid fa-qrcode text-md"></i>
                     <span>QR Code (2D)</span>
                 </button>
+                <button id="tab-usb" onclick="switchScannerTab('usb')" class="flex-1 py-3 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100/80 transition flex items-center justify-center space-x-2 focus:outline-none rounded-xl">
+                    <i class="fa-solid fa-keyboard text-md"></i>
+                    <span>USB Scanner</span>
+                </button>
             </div>
 
             <!-- Modal Body -->
@@ -286,7 +290,7 @@
                         </label>
                         <label class="flex items-center space-x-1.5 cursor-pointer">
                             <input type="radio" name="scan-action" value="autofill" class="text-indigo-600 focus:ring-indigo-500 border-slate-300">
-                            <span class="font-bold text-slate-700">Autofill Form</span>
+                            <span class="font-bold text-slate-700">Autofill from Web</span>
                         </label>
                     </div>
                 </div>
@@ -309,6 +313,15 @@
                 <!-- QR Scanner Viewport -->
                 <div id="panel-qrcode" class="hidden relative bg-slate-950 rounded-2xl overflow-hidden aspect-video border border-slate-800 flex flex-col items-center justify-center p-2 shadow-inner">
                     <div id="qr-reader" class="w-full h-full rounded-xl overflow-hidden"></div>
+                </div>
+
+                <!-- USB Barcode Scanner (HID keyboard-wedge device) Input Panel -->
+                <div id="panel-usb" class="hidden relative bg-slate-950 rounded-2xl overflow-hidden aspect-video border border-slate-800 flex flex-col items-center justify-center gap-4 p-8 shadow-inner text-center">
+                    <i class="fa-solid fa-keyboard text-3xl text-indigo-400"></i>
+                    <p class="text-slate-300 text-xs font-bold max-w-xs">Click the field below, then scan with your USB barcode scanner (or type a code and press Enter)</p>
+                    <input type="text" id="usb-scan-input" autocomplete="off" onkeydown="handleUsbScanKeydown(event)"
+                           placeholder="Waiting for scan..."
+                           class="w-full max-w-sm px-4 py-3 rounded-xl border border-slate-700 bg-slate-900 text-slate-100 placeholder-slate-500 text-sm text-center font-bold focus:outline-none focus:ring-4 focus:ring-indigo-500/30 focus:border-indigo-500">
                 </div>
             </div>
 

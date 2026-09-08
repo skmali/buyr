@@ -2,6 +2,7 @@ package com.malison.catalogservice.service;
 
 import com.malison.catalogservice.model.ProductRequest;
 import com.malison.catalogservice.model.ProductResponse;
+import com.malison.catalogservice.model.UpcLookupResponse;
 import java.util.List;
 
 public interface ProductService {
@@ -12,4 +13,6 @@ public interface ProductService {
     List<ProductResponse> getAllProducts();
 
     void reduceQuantity(long id, int quantity);
+
+    UpcLookupResponse lookupUpc(String code);
 }

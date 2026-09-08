@@ -24,10 +24,5 @@ eureka:
   instance:
     prefer-ip-address: true
 
----
-spring:
-  config:
-    activate:
-      on-profile: local
 catalog-service:
-  url: http://localhost:8080/api/product
+  url: http://CatalogService/api/product

@@ -6,6 +6,10 @@ spring:
     name: CatalogUi
   thymeleaf:
     cache: false # Disable caching in development for live updates
+  web:
+    resources:
+      cache:
+        period: 0 # Disable static resource caching in development for live updates
 
 eureka:
   client:
@@ -15,20 +19,9 @@ eureka:
       defaultZone: ${EUREKA_SERVER_ADDRESS:http://localhost:8761/eureka}
   instance:
     prefer-ip-address: true
+catalog-service:
+  url: http://CatalogService/api/product
 cart-service:
   url: http://CartService/api/cart
 order-service:
   url: http://OrderService/api/order
-
----
-spring:
-  config:
-    activate:
-      on-profile: local
-catalog-service:
-  url: http://localhost:8080/api/product
-cart-service:
-  url: http://localhost:8082/api/cart
-order-service:
-  url: http://localhost:8083/api/order
-
