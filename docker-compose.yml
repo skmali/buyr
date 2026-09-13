@@ -1,0 +1,121 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: buyr-postgres
+    environment:
+      POSTGRES_DB: catalogdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: buyr-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  service-registry:
+    image: skmali/service-registry:latest
+    container_name: buyr-service-registry
+    ports:
+      - "127.0.0.1:8761:8761"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8761/"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  catalog-service:
+    image: skmali/catalog-service:latest
+    container_name: buyr-catalog-service
+    environment:
+      EUREKA_SERVER_ADDRESS: http://service-registry:8761/eureka
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      service-registry:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  cart-service:
+    image: skmali/cart-service:latest
+    container_name: buyr-cart-service
+    environment:
+      EUREKA_SERVER_ADDRESS: http://service-registry:8761/eureka
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    ports:
+      - "127.0.0.1:8082:8082"
+    depends_on:
+      service-registry:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  order-service:
+    image: skmali/order-service:latest
+    container_name: buyr-order-service
+    environment:
+      EUREKA_SERVER_ADDRESS: http://service-registry:8761/eureka
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:8083:8083"
+    depends_on:
+      service-registry:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  catalog-ui:
+    image: skmali/catalog-ui:latest
+    container_name: buyr-catalog-ui
+    environment:
+      EUREKA_SERVER_ADDRESS: http://service-registry:8761/eureka
+    ports:
+      - "8081:8081"
+    depends_on:
+      service-registry:
+        condition: service_healthy
+      catalog-service:
+        condition: service_started
+      cart-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
