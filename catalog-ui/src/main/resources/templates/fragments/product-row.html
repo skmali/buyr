@@ -4,6 +4,12 @@
      class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:border-slate-300 transition duration-200 flex flex-col justify-between space-y-4">
     
     <div>
+        <!-- Product image: hasImage points this at the real image proxy endpoint, otherwise straight at the placeholder -->
+        <img th:src="${product.hasImage} ? @{'/products/' + ${product.id} + '/image'} : @{/img/placeholder-product.svg}"
+             onerror="this.onerror=null;this.src='/img/placeholder-product.svg';"
+             class="w-full h-36 object-cover rounded-xl border border-slate-100 bg-slate-50 mb-1"
+             th:alt="${product.name}">
+
         <div class="flex items-start justify-between">
             <span class="text-xs font-semibold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md" th:text="'ID: ' + ${product.id}">
                 ID: 1

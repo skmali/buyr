@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300" role="img" aria-label="No product image">
+  <rect width="400" height="300" fill="#f8fafc"/>
+  <rect x="0.5" y="0.5" width="399" height="299" fill="none" stroke="#e2e8f0" stroke-width="1"/>
+  <g transform="translate(200,138)" fill="none" stroke="#94a3b8" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M -40 -28 L -40 28 L 40 28 L 40 -28 Z"/>
+    <path d="M -40 -28 L 0 -52 L 40 -28"/>
+    <path d="M 0 -52 L 0 2"/>
+    <path d="M -40 -28 L 0 2 L 40 -28"/>
+  </g>
+  <text x="200" y="222" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#94a3b8" text-anchor="middle">No image yet</text>
+</svg>

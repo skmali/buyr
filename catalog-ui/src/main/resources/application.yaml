@@ -10,6 +10,10 @@ spring:
     resources:
       cache:
         period: 0 # Disable static resource caching in development for live updates
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
 
 eureka:
   client:

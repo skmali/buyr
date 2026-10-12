@@ -19,6 +19,10 @@
     properties:
       hibernate:
         format_sql: true
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
 
 
 server:
@@ -36,6 +40,11 @@ eureka:
 
 upc-lookup:
   url: https://api.upcitemdb.com/prod/trial/lookup
+
+# AI image generation for "Generate from description", via Pollinations.ai - a free,
+# unauthenticated text-to-image API. No API key needed.
+image-generation:
+  base-url: https://image.pollinations.ai/prompt
 
 ---
 spring:

@@ -1,5 +1,6 @@
 package com.malison.catalogservice.controller.advice;
 
+import com.malison.catalogservice.exception.ImageServiceException;
 import com.malison.catalogservice.exception.ProductServiceException;
 import com.malison.catalogservice.model.ErrorResponse;
 import org.springframework.http.HttpStatus;
@@ -16,6 +17,12 @@ public class RestResponseEntityExceptionHandler extends ResponseEntityExceptionH
     public ResponseEntity<ErrorResponse> handleProductServiceException(ProductServiceException ex) {
         return new ResponseEntity<>(ErrorResponse.builder().message(ex.getMessage()).errorCode(ex.getErrorCode())
                 .build(), HttpStatus.NOT_FOUND);
+    }
+
+    @ExceptionHandler(ImageServiceException.class)
+    public ResponseEntity<ErrorResponse> handleImageServiceException(ImageServiceException ex) {
+        return new ResponseEntity<>(ErrorResponse.builder().message(ex.getMessage()).errorCode(ex.getErrorCode())
+                .build(), ex.getHttpStatus());
     }
 
 }

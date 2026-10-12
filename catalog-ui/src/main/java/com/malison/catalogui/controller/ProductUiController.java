@@ -11,13 +11,21 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -75,11 +83,15 @@ public class ProductUiController {
     }
 
     @PostMapping("/products")
-    public String addProduct(@ModelAttribute ProductRequest request, Model model) {
+    public String addProduct(@ModelAttribute ProductRequest request,
+                              @RequestParam(value = "imageFile", required = false) MultipartFile imageFile,
+                              @RequestParam(value = "imageSource", required = false, defaultValue = "none") String imageSource,
+                              Model model) {
         log.info("UI request: add product through backend: {}", request);
         try {
             Long productId = restTemplate.postForObject(backendUrl, request, Long.class);
             if (productId != null) {
+                attachImage(productId, imageSource, imageFile);
                 ProductResponse product = restTemplate.getForObject(backendUrl + "/" + productId, ProductResponse.class);
                 model.addAttribute("product", product);
                 return "fragments/product-row :: product-row";
@@ -88,6 +100,49 @@ public class ProductUiController {
             log.error("Failed to add product: {}", e.getMessage());
         }
         return "fragments/product-row :: error-toast";
+    }
+
+    /**
+     * Best-effort: the product itself is already created at this point, so a failed
+     * image upload/generation never fails the whole "add product" request - it just
+     * leaves the product without an image (card falls back to the placeholder).
+     */
+    private void attachImage(long productId, String imageSource, MultipartFile imageFile) {
+        try {
+            if ("upload".equals(imageSource) && imageFile != null && !imageFile.isEmpty()) {
+                MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+                body.add("file", new ByteArrayResource(imageFile.getBytes()) {
+                    @Override
+                    public String getFilename() {
+                        return imageFile.getOriginalFilename();
+                    }
+                });
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+                restTemplate.postForObject(backendUrl + "/" + productId + "/image", new HttpEntity<>(body, headers), ProductResponse.class);
+            } else if ("generate".equals(imageSource)) {
+                restTemplate.postForObject(backendUrl + "/" + productId + "/image/generate", null, ProductResponse.class);
+            }
+        } catch (IOException e) {
+            log.error("Failed to read uploaded image bytes for product {}: {}", productId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Failed to attach image ({}) to product {}: {}", imageSource, productId, e.getMessage());
+        }
+    }
+
+    /** Streams a product's image bytes from CatalogService to the browser. */
+    @GetMapping("/products/{id}/image")
+    public ResponseEntity<byte[]> productImage(@PathVariable long id) {
+        try {
+            ResponseEntity<byte[]> response = restTemplate.getForEntity(backendUrl + "/" + id + "/image", byte[].class);
+            return ResponseEntity.status(response.getStatusCode())
+                    .contentType(response.getHeaders().getContentType() != null
+                            ? response.getHeaders().getContentType() : MediaType.APPLICATION_OCTET_STREAM)
+                    .body(response.getBody());
+        } catch (Exception e) {
+            log.error("Failed to fetch image for product {}: {}", id, e.getMessage());
+            return ResponseEntity.notFound().build();
+        }
     }
 
     @PostMapping("/cart/add/{productId}")

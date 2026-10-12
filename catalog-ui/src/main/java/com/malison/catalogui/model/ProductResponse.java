@@ -15,4 +15,5 @@ public class ProductResponse {
     private String description;
     private double price;
     private int quantity;
+    private boolean hasImage;
 }
