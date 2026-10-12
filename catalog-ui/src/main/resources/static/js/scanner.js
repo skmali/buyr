@@ -8,48 +8,18 @@ const SCANNER_TAB_INACTIVE_CLASSES = ["border-transparent", "text-slate-500"];
 const BARCODE_READERS = ["ean_reader", "ean_8_reader", "code_128_reader", "upc_reader", "upc_e_reader", "code_39_reader"];
 const SCANNER_TABS = ["barcode", "qrcode", "usb"];
 
-function smoothScrollToCatalog() {
-    const anchor = document.getElementById("catalog-section-anchor");
-    if (anchor) {
-        anchor.scrollIntoView({ behavior: "smooth" });
-    }
-}
+// Catalog search/filtering lives in catalog-page.js (filterCatalogWithQuery, smoothScrollToCatalog).
 
-function filterProducts() {
-    const query = document.getElementById("product-search-input").value.toLowerCase();
-    filterCatalogWithQuery(query);
-}
-
-function filterCatalogWithQuery(query) {
-    const cards = document.querySelectorAll("#product-grid-container > div");
-    let foundAny = false;
-
-    cards.forEach(card => {
-        const titleElement = card.querySelector("h3");
-        const descElement = card.querySelector("p");
-        const title = titleElement ? titleElement.textContent.toLowerCase() : "";
-        const desc = descElement ? descElement.textContent.toLowerCase() : "";
-
-        if (title.includes(query) || desc.includes(query)) {
-            card.style.display = "";
-            foundAny = true;
-        } else {
-            card.style.display = "none";
-        }
-    });
-
-    const emptyState = document.getElementById("empty-catalog-state");
-    if (emptyState) {
-        if (foundAny) {
-            emptyState.style.display = "none";
-        } else {
-            emptyState.style.display = "block";
+// action: "search" (opened from the header) or "autofill" (opened from the New Product sheet).
+// It only preselects the choice - the user can still switch it in the modal.
+function openScannerModal(action) {
+    if (action) {
+        const radio = document.querySelector(`input[name="scan-action"][value="${action}"]`);
+        if (radio) {
+            radio.checked = true;
         }
     }
-}
-
-function openScannerModal() {
-    document.getElementById("scanner-modal").classList.remove("hidden");
+    UiMotion.openModal("scanner-modal");
     scanLocked = false;
     setScannerStatus("Ready to scan...");
     startActiveScanner();
@@ -57,7 +27,7 @@ function openScannerModal() {
 
 function closeScannerModal() {
     stopAllScanners();
-    document.getElementById("scanner-modal").classList.add("hidden");
+    UiMotion.closeModal("scanner-modal");
 }
 
 function switchScannerTab(tab) {
@@ -207,7 +177,7 @@ function handleUsbScanResult(code) {
     const action = selectedAction ? selectedAction.value : "search";
 
     if (action === "autofill") {
-        applyScannedCodeToForm(code).finally(closeScannerModal);
+        autofillFormAndClose(code);
     } else {
         applyScannedCodeToSearch(code);
         const input = document.getElementById("usb-scan-input");
@@ -228,11 +198,24 @@ function handleScanResult(code) {
     const action = selectedAction ? selectedAction.value : "search";
 
     if (action === "autofill") {
-        applyScannedCodeToForm(code).finally(closeScannerModal);
+        autofillFormAndClose(code);
     } else {
         applyScannedCodeToSearch(code);
         closeScannerModal();
     }
+}
+
+// The form lives in the New Product sheet: make sure it's open, fill it, then hand focus to the
+// Name field only after the scanner has closed (closing returns focus to the scan button).
+function autofillFormAndClose(code) {
+    openProductSheet();
+    applyScannedCodeToForm(code).finally(() => {
+        closeScannerModal();
+        const nameField = document.getElementById("name");
+        if (nameField) {
+            nameField.focus();
+        }
+    });
 }
 
 function applyScannedCodeToSearch(code) {
@@ -268,10 +251,6 @@ async function applyScannedCodeToForm(code) {
         console.error("UPC lookup failed", e);
         if (nameField) nameField.value = code;
         setScannerStatus("Lookup failed - name field filled with the code");
-    }
-
-    if (nameField) {
-        nameField.focus();
     }
 }
 
