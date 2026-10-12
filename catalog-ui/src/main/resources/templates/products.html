@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Product Catalog Hub</title>
+    <title>Buyr Catalog</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- HTMX CDN -->
@@ -60,220 +60,370 @@
         #qr-reader button:hover {
             background-color: #d97706 !important;
         }
+
+        /* ---- Response: every button acknowledges the press instantly, then eases back ---- */
+        button:not(:disabled) {
+            transition-property: color, background-color, border-color, box-shadow, opacity, transform, scale;
+            transition-duration: 150ms;
+            transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        button:not(:disabled):active {
+            scale: 0.97;
+            transition-duration: 60ms;
+        }
+        button:disabled {
+            cursor: not-allowed;
+        }
+        button:focus-visible, a:focus-visible, [role="dialog"] [data-modal-panel]:focus-visible {
+            outline: 2px solid #6366f1;
+            outline-offset: 2px;
+        }
+        [data-modal-panel]:focus:not(:focus-visible) {
+            outline: none;
+        }
+        /* An HTMX request in flight: show it's working, but never lock the control out */
+        button.htmx-request {
+            opacity: 0.7;
+        }
+
+        /* ---- Header: translucent material; its edge appears only once content scrolls under it ---- */
+        #app-header {
+            border-bottom: 1px solid transparent;
+            transition: border-color 200ms ease, box-shadow 200ms ease;
+        }
+        #app-header[data-scrolled] {
+            border-bottom-color: rgb(226 232 240 / 0.8);
+            box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.05);
+        }
+
+        /* ---- Modals: scrim fades, panel materializes out of the control that opened it.
+           Exit runs the mirrored curve so it retreats along the path it arrived on. ---- */
+        [data-modal] {
+            opacity: 0;
+            transition: opacity 200ms ease;
+        }
+        [data-modal][data-state="open"] {
+            opacity: 1;
+        }
+        [data-modal-panel] {
+            opacity: 0;
+            transform: scale(0.92);
+            filter: blur(6px);
+            transition: opacity 180ms ease, transform 240ms cubic-bezier(1, 0, 0.68, 0.28), filter 180ms ease;
+        }
+        [data-modal][data-state="open"] [data-modal-panel] {
+            opacity: 1;
+            transform: none;
+            filter: none;
+            transition: opacity 220ms ease, transform 380ms cubic-bezier(0.32, 0.72, 0, 1), filter 260ms ease;
+        }
+
+        /* ---- Header cart button: briefly ring the cart so the eye lands on it ---- */
+        @keyframes cart-flash {
+            0% { box-shadow: 0 0 0 0 rgb(99 102 241 / 0); }
+            25% { box-shadow: 0 0 0 4px rgb(99 102 241 / 0.35); }
+            100% { box-shadow: 0 0 0 0 rgb(99 102 241 / 0); }
+        }
+        .cart-flash {
+            animation: cart-flash 900ms ease-out;
+        }
+
+        /* ---- New catalog cards materialize in place instead of popping in ---- */
+        #product-grid-container > .htmx-added {
+            opacity: 0;
+            transform: scale(0.96);
+        }
+
+        #image-confirm-preview {
+            transition: opacity 300ms ease;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            /* Keep the cross-fades that aid comprehension; drop scaling, blur and looping motion */
+            [data-modal-panel], #product-grid-container > .htmx-added {
+                transform: none !important;
+                filter: none !important;
+            }
+            button:not(:disabled):active {
+                scale: none;
+            }
+        }
+        @media (prefers-reduced-transparency: reduce) {
+            #app-header {
+                background-color: #fff !important;
+                backdrop-filter: none !important;
+            }
+            [data-modal] {
+                background-color: rgb(2 6 23 / 0.94) !important;
+                backdrop-filter: none !important;
+            }
+        }
+        @media (prefers-contrast: more) {
+            #app-header {
+                background-color: #fff !important;
+                border-bottom-color: #64748b !important;
+            }
+        }
     </style>
 </head>
-<body class="bg-slate-50/50 min-h-screen text-slate-800 antialiased">
+<body class="bg-slate-50 min-h-screen text-slate-800 antialiased">
 
-    <!-- Premium Sticky Header -->
-    <header class="bg-white/80 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40 shadow-sm">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-                <div class="bg-gradient-to-tr from-indigo-600 to-violet-500 text-white p-2 rounded-xl shadow-md shadow-indigo-100">
-                    <i class="fa-solid fa-boxes-stacked text-xl"></i>
+    <!-- Sticky translucent toolbar: brand, always-reachable search + scan, and the two primary actions -->
+    <header id="app-header" class="bg-white/75 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center gap-3 sm:gap-4">
+            <a href="/" class="flex items-center gap-2.5 shrink-0 rounded-xl" aria-label="Buyr Catalog">
+                <span class="bg-gradient-to-tr from-indigo-600 to-violet-500 text-white w-9 h-9 rounded-xl flex items-center justify-center shadow-sm">
+                    <i class="fa-solid fa-boxes-stacked"></i>
+                </span>
+                <span class="hidden md:block text-lg font-bold tracking-tight text-slate-900">Buyr <span class="font-medium text-slate-500">Catalog</span></span>
+            </a>
+
+            <!-- Search stays in the toolbar so it's reachable from anywhere on the page ("/" focuses it) -->
+            <div class="relative flex-1 max-w-xl mx-auto" role="search">
+                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
+                <input type="search" id="product-search-input" oninput="filterProducts()" autocomplete="off"
+                       placeholder="Search products" aria-label="Search products" aria-keyshortcuts="/" title="Search products (press /)"
+                       class="w-full h-10 pl-10 pr-[4.5rem] rounded-xl bg-slate-100/80 hover:bg-slate-100 focus:bg-white border border-transparent focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none text-base sm:text-sm placeholder-slate-400 transition [&::-webkit-search-cancel-button]:hidden">
+                <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                    <button type="button" id="search-clear-btn" onclick="clearSearch()" aria-label="Clear search"
+                            class="hidden w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/70 flex items-center justify-center">
+                        <i class="fa-solid fa-circle-xmark text-sm"></i>
+                    </button>
+                    <button type="button" onclick="openScannerModal('search')" title="Scan a barcode or QR code to search" aria-label="Scan a barcode or QR code to search"
+                            class="w-7 h-7 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 flex items-center justify-center">
+                        <i class="fa-solid fa-barcode text-sm"></i>
+                    </button>
                 </div>
-                <span class="text-xl font-bold tracking-tight text-slate-900">Buyr<span class="bg-gradient-to-r from-indigo-600 to-violet-500 bg-clip-text text-transparent font-semibold"> Catalog Hub</span></span>
             </div>
-            
-            <div class="flex items-center space-x-4">
-                <!-- Status Badge -->
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-50 text-emerald-700 border border-emerald-200/50">
-                    <span class="w-1.5 h-1.5 mr-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    Registry Active
-                </span>
-                
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase bg-indigo-50 text-indigo-700 border border-indigo-200/50">
-                    PostgreSQL Docker Active
-                </span>
+
+            <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                <button type="button" onclick="openProductSheet()" aria-label="New product"
+                        class="h-10 w-10 sm:w-auto sm:px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold shadow-sm flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-plus"></i><span class="hidden sm:inline">New product</span>
+                </button>
+                <button type="button" onclick="revealCart()" aria-label="Show cart"
+                        class="relative h-10 w-10 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 flex items-center justify-center">
+                    <i class="fa-solid fa-bag-shopping text-lg"></i>
+                    <span th:replace="~{fragments/product-row :: cart-badge}"></span>
+                </button>
             </div>
         </div>
     </header>
 
-    <!-- Main Content Container -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-16">
 
-        <!-- Stunning Hero/Control Panel -->
-        <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-8 text-white shadow-xl shadow-slate-900/10 mb-10 relative overflow-hidden">
-            <!-- Background Decoration Grid -->
-            <div class="absolute inset-0 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none"></div>
-            <div class="absolute -right-10 -bottom-10 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
-            
-            <div class="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-                <div class="space-y-2">
-                    <span class="text-indigo-400 text-xs font-bold uppercase tracking-wider">Dynamic Microservices Showcase</span>
-                    <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight">Smart Inventory Catalog</h1>
-                    <p class="text-slate-300 text-sm max-w-lg">
-                        Manage inventory with local PostgreSQL databases, Redis cache queues, and dynamic service discovery.
-                    </p>
-                </div>
-
-                <!-- Live Stats Section inside Hero -->
-                <div class="grid grid-cols-2 gap-4 bg-white/5 p-4 rounded-2xl border border-white/10 backdrop-blur-sm self-start min-w-[240px]">
-                    <div>
-                        <span class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Catalog Stock</span>
-                        <div class="text-2xl font-extrabold text-white mt-1" th:text="${#lists.size(products)}">0</div>
-                    </div>
-                    <div>
-                        <span class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Active Cart</span>
-                        <div class="text-2xl font-extrabold text-indigo-300 mt-1" th:text="${#lists.size(cart.items)}">0</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Sleek Barcode/QR Centered Search Bar -->
-            <div class="relative max-w-2xl mt-8">
-                <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none text-slate-400">
-                    <i class="fa-solid fa-magnifying-glass"></i>
-                </div>
-                <input type="text" id="product-search-input" onkeyup="filterProducts()" placeholder="Type to search catalog or click scan on the right..."
-                       class="w-full pl-12 pr-12 py-3.5 bg-white/10 hover:bg-white/15 focus:bg-white text-slate-200 focus:text-slate-900 placeholder-slate-400 focus:placeholder-slate-400 rounded-2xl border border-white/10 focus:border-white focus:ring-4 focus:ring-indigo-500/10 outline-none transition duration-200 shadow-inner text-sm">
-                
-                <!-- Floating Camera Scan Trigger -->
-                <button onclick="openScannerModal()" title="Open Live Camera Scanner"
-                        class="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-indigo-500 hover:bg-indigo-600 active:bg-indigo-700 text-white rounded-xl transition duration-150 shadow-md">
-                    <i class="fa-solid fa-camera text-sm"></i>
-                </button>
-            </div>
-        </div>
-
-        <!-- Error Alerts -->
-        <div th:if="${errorMessage}" class="mb-8 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-start space-x-3 shadow-sm">
-            <div class="bg-rose-100 text-rose-600 p-1.5 rounded-lg">
-                <i class="fa-solid fa-circle-exclamation text-md"></i>
-            </div>
+        <div th:if="${errorMessage}" role="alert" class="mb-6 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-start gap-3">
+            <i class="fa-solid fa-circle-exclamation text-rose-500 mt-0.5"></i>
             <div>
-                <h3 class="text-sm font-bold text-rose-900">Backend Communication Error</h3>
-                <p class="text-xs text-rose-700 mt-0.5" th:text="${errorMessage}">Error details...</p>
+                <h2 class="text-sm font-semibold text-rose-900">Can't reach the catalog service</h2>
+                <p class="text-sm text-rose-700 mt-0.5" th:text="${errorMessage}">Error details...</p>
             </div>
         </div>
 
-        <!-- Dashboard Dashboard Layout -->
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
-            
-            <!-- Column 1: Add Product Form (Creator Panel) -->
-            <div class="lg:col-span-1">
-                <div class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm sticky top-24">
-                    <div class="flex items-center space-x-2.5 mb-6 pb-4 border-b border-slate-100">
-                        <div class="bg-indigo-50 text-indigo-600 p-1.5 rounded-lg">
-                            <i class="fa-solid fa-circle-plus text-md"></i>
-                        </div>
-                        <h2 class="text-md font-extrabold text-slate-900">New Product</h2>
-                    </div>
+        <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem] gap-8 items-start">
 
-                    <!-- HTMX Post form: Adds a product and appends the returned fragment row directly -->
-                    <form hx-post="/products"
-                          hx-target="#product-grid-container"
-                          hx-swap="afterbegin"
-                          hx-on::after-request="this.reset()"
-                          class="space-y-4">
-                        
-                        <div>
-                            <label for="name" class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">Product Name</label>
-                            <input type="text" id="name" name="name" required placeholder="e.g. Wireless Mouse"
-                                   class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition duration-150 bg-slate-50/50 focus:bg-white">
-                        </div>
-
-                        <div>
-                            <label for="description" class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">Description</label>
-                            <textarea id="description" name="description" rows="3" placeholder="Explain features, specs..."
-                                      class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition duration-150 bg-slate-50/50 focus:bg-white"></textarea>
-                        </div>
-
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label for="price" class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">Price ($)</label>
-                                <input type="number" id="price" name="price" step="0.01" min="0" required placeholder="0.00"
-                                       class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition duration-150 bg-slate-50/50 focus:bg-white">
-                            </div>
-                            <div>
-                                <label for="quantity" class="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">Stock Qty</label>
-                                <input type="number" id="quantity" name="quantity" min="0" required placeholder="10"
-                                       class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition duration-150 bg-slate-50/50 focus:bg-white">
-                            </div>
-                        </div>
-
-                        <button type="submit" 
-                                class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-100 transition duration-150 flex items-center justify-center space-x-2">
-                            <span>Add to Catalog</span>
-                            <i class="fa-solid fa-arrow-right text-xs"></i>
-                        </button>
-                    </form>
-                </div>
-            </div>
-
-            <!-- Columns 2 & 3: Catalog List Showcase -->
-            <div class="lg:col-span-2">
-                <div class="flex items-center justify-between mb-6 pb-2 border-b border-slate-200/50">
-                    <div class="flex items-center space-x-2">
-                        <div class="bg-indigo-50 text-indigo-600 p-1 rounded-lg">
-                            <i class="fa-solid fa-list text-sm"></i>
-                        </div>
-                        <h2 class="text-md font-extrabold text-slate-900">Current Catalog Products</h2>
-                    </div>
+            <!-- Catalog: the primary content gets the most room -->
+            <section id="catalog-section-anchor" aria-labelledby="catalog-heading" class="scroll-mt-24 min-w-0">
+                <div class="mb-5">
+                    <h1 id="catalog-heading" class="text-2xl sm:text-3xl font-bold tracking-tight leading-tight text-slate-900">Catalog</h1>
+                    <p id="catalog-count" class="text-sm text-slate-500 mt-1 tabular-nums" aria-live="polite"
+                       th:text="${#lists.size(products)} + (${#lists.size(products) == 1} ? ' product' : ' products')">0 products</p>
                 </div>
 
-                <!-- Product Grid List Container -->
-                <div id="product-grid-container" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <!-- Thymeleaf renders dynamic product cards -->
-                    <div th:each="product : ${products}" 
+                <div id="product-grid-container" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+                    <div th:each="product : ${products}"
                          th:insert="~{fragments/product-row :: product-row}">
                     </div>
                 </div>
 
-                <!-- Empty State if Catalog empty -->
-                <div th:if="${#lists.isEmpty(products)}" id="empty-catalog-state" class="text-center py-16 bg-white border border-dashed border-slate-200 rounded-3xl mt-4 shadow-sm">
-                    <div class="w-16 h-16 bg-slate-50 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-100">
-                        <i class="fa-solid fa-box-open text-2xl"></i>
+                <!-- Empty catalog: say what to do next, and offer the action right here -->
+                <div th:if="${#lists.isEmpty(products)}" id="empty-catalog-state" class="text-center py-16 px-6 bg-white border border-dashed border-slate-300 rounded-2xl">
+                    <div class="w-14 h-14 bg-indigo-50 text-indigo-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                        <i class="fa-solid fa-box-open text-xl"></i>
                     </div>
-                    <h3 class="text-sm font-bold text-slate-800">No products found</h3>
-                    <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">Add a product in the panel on the left to start populating your inventory catalog!</p>
+                    <h2 class="text-base font-semibold text-slate-900">No products yet</h2>
+                    <p class="text-sm text-slate-500 mt-1 max-w-xs mx-auto">Add your first product, or scan its barcode to fill in the details for you.</p>
+                    <button type="button" onclick="openProductSheet()"
+                            class="mt-5 h-10 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold inline-flex items-center gap-2">
+                        <i class="fa-solid fa-plus"></i><span>New product</span>
+                    </button>
                 </div>
-            </div>
-            
-            <!-- Column 4: Cart Sidebar + Order History -->
-            <div class="lg:col-span-1 space-y-8">
-                <!-- Cart Section -->
-                <div id="cart-sidebar-container" class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm sticky top-24">
-                    <!-- HTMX will render and swap into this container -->
+
+                <!-- Search with no matches: a different message from "empty", with a way back -->
+                <div id="catalog-no-results" class="hidden text-center py-16 px-6" role="status">
+                    <div class="w-14 h-14 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                        <i class="fa-solid fa-magnifying-glass text-xl"></i>
+                    </div>
+                    <h2 class="text-base font-semibold text-slate-900">No matches for “<span id="catalog-no-results-query"></span>”</h2>
+                    <p class="text-sm text-slate-500 mt-1">Try a different word, or check the spelling.</p>
+                    <button type="button" onclick="clearSearch()"
+                            class="mt-5 h-10 px-4 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-semibold">
+                        Clear search
+                    </button>
+                </div>
+            </section>
+
+            <!-- Right rail: the cart first (it's what you act on), past orders tucked underneath -->
+            <aside aria-label="Cart and orders" class="space-y-4 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:overscroll-contain">
+                <div id="cart-sidebar-container" class="bg-white rounded-2xl border border-slate-200/80 shadow-sm scroll-mt-24">
                     <div th:insert="~{fragments/product-row :: cart-sidebar-content}"></div>
                 </div>
 
-                <!-- Order History Section -->
-                <div id="order-history-container" class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm">
+                <div id="order-history-container" class="bg-white rounded-2xl border border-slate-200/80 shadow-sm">
                     <div th:insert="~{fragments/product-row :: order-history-content}"></div>
                 </div>
-            </div>
-            
+            </aside>
         </div>
     </main>
 
+    <!-- New Product sheet: slides in from the right edge; drag its header back to the right,
+         press Esc, or click outside to close. Submission is still gated behind the image
+         confirmation modal (see product-image.js) via the custom "confirmed-submit" event. -->
+    <div id="product-sheet" class="fixed inset-0 z-40 hidden">
+        <div data-sheet-scrim class="absolute inset-0 bg-slate-950/30"></div>
+        <section data-sheet-panel role="dialog" aria-modal="true" aria-labelledby="product-sheet-title" tabindex="-1"
+                 class="absolute inset-y-0 right-0 w-full sm:max-w-md bg-white shadow-2xl flex flex-col outline-none will-change-transform">
+
+            <div data-sheet-handle class="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-3 select-none cursor-grab active:cursor-grabbing">
+                <div class="min-w-0">
+                    <h2 id="product-sheet-title" class="text-lg font-semibold tracking-tight text-slate-900">New product</h2>
+                    <p class="text-sm text-slate-500">Fill it in, or scan a barcode to start.</p>
+                </div>
+                <div class="flex items-center gap-1 shrink-0">
+                    <button type="button" onclick="openScannerModal('autofill')"
+                            class="h-9 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium flex items-center gap-2">
+                        <i class="fa-solid fa-barcode"></i><span>Scan</span>
+                    </button>
+                    <button type="button" onclick="closeProductSheet()" aria-label="Close"
+                            class="w-9 h-9 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+            </div>
+
+            <form id="add-product-form"
+                  hx-post="/products"
+                  hx-encoding="multipart/form-data"
+                  hx-trigger="confirmed-submit"
+                  hx-target="#product-grid-container"
+                  hx-swap="afterbegin"
+                  hx-disabled-elt="#add-product-submit-btn"
+                  onsubmit="handleAddToCatalogClick(); return false;"
+                  class="flex-1 min-h-0 flex flex-col">
+
+                <div class="flex-1 overflow-y-auto overscroll-contain px-5 sm:px-6 py-5 space-y-5">
+                    <div>
+                        <label for="name" class="block text-sm font-medium text-slate-700 mb-1.5">Name</label>
+                        <input type="text" id="name" name="name" required placeholder="e.g. Wireless Mouse" autocomplete="off"
+                               class="w-full h-11 px-3.5 rounded-xl border border-slate-200 bg-white text-base sm:text-sm placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition">
+                    </div>
+
+                    <div>
+                        <label for="description" class="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
+                        <textarea id="description" name="description" rows="4" placeholder="Features, specs, materials..."
+                                  aria-describedby="description-help"
+                                  class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-base sm:text-sm placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition resize-y"></textarea>
+                        <p id="description-help" class="text-xs text-slate-500 mt-1.5">Also used to generate an image, if you choose to.</p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="price" class="block text-sm font-medium text-slate-700 mb-1.5">Price</label>
+                            <div class="relative">
+                                <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base sm:text-sm pointer-events-none">$</span>
+                                <input type="number" id="price" name="price" step="0.01" min="0" required placeholder="0.00" inputmode="decimal"
+                                       class="w-full h-11 pl-7 pr-3.5 rounded-xl border border-slate-200 bg-white text-base sm:text-sm tabular-nums placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition">
+                            </div>
+                        </div>
+                        <div>
+                            <label for="quantity" class="block text-sm font-medium text-slate-700 mb-1.5">Stock</label>
+                            <input type="number" id="quantity" name="quantity" min="0" required placeholder="10" inputmode="numeric"
+                                   class="w-full h-11 px-3.5 rounded-xl border border-slate-200 bg-white text-base sm:text-sm tabular-nums placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition">
+                        </div>
+                    </div>
+
+                    <fieldset>
+                        <legend class="block text-sm font-medium text-slate-700 mb-1.5">Image</legend>
+                        <!-- Segmented control (still plain radios underneath, so keyboard and forms work as before) -->
+                        <div class="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-xl">
+                            <label class="cursor-pointer">
+                                <input type="radio" name="imageSource" value="none" checked onchange="updateImageSourceUi(this.value)" class="peer sr-only">
+                                <span class="flex items-center justify-center gap-1.5 h-9 rounded-lg text-sm font-medium text-slate-500 peer-checked:bg-white peer-checked:text-slate-900 peer-checked:shadow-sm peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-500 transition">None</span>
+                            </label>
+                            <label class="cursor-pointer">
+                                <input type="radio" name="imageSource" value="upload" onchange="updateImageSourceUi(this.value)" class="peer sr-only">
+                                <span class="flex items-center justify-center gap-1.5 h-9 rounded-lg text-sm font-medium text-slate-500 peer-checked:bg-white peer-checked:text-slate-900 peer-checked:shadow-sm peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-500 transition">
+                                    <i class="fa-solid fa-arrow-up-from-bracket text-xs"></i>Upload
+                                </span>
+                            </label>
+                            <label class="cursor-pointer">
+                                <input type="radio" name="imageSource" value="generate" onchange="updateImageSourceUi(this.value)" class="peer sr-only">
+                                <span class="flex items-center justify-center gap-1.5 h-9 rounded-lg text-sm font-medium text-slate-500 peer-checked:bg-white peer-checked:text-slate-900 peer-checked:shadow-sm peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-500 transition">
+                                    <i class="fa-solid fa-wand-magic-sparkles text-xs"></i>Generate
+                                </span>
+                            </label>
+                        </div>
+
+                        <!-- Upload panel: file picker + client-side preview -->
+                        <div id="image-upload-panel" class="hidden mt-3">
+                            <input type="file" id="imageFile" name="imageFile" accept="image/png,image/jpeg,image/webp"
+                                   onchange="previewSelectedImage(this)"
+                                   class="w-full text-sm text-slate-600 file:mr-3 file:h-9 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer">
+                            <img id="image-preview" class="hidden mt-3 w-full aspect-[4/3] object-cover rounded-xl border border-slate-200" alt="Selected image preview">
+                        </div>
+
+                        <!-- Generate panel: just explains what happens on "Add to catalog" -->
+                        <p id="image-generate-hint" class="hidden mt-3 text-sm text-slate-600 bg-indigo-50/60 border border-indigo-100 rounded-xl px-3.5 py-3 leading-snug">
+                            <i class="fa-solid fa-wand-magic-sparkles text-indigo-500 mr-1"></i>
+                            An image will be generated from the description. You'll see it and confirm before anything is saved.
+                        </p>
+                    </fieldset>
+                </div>
+
+                <div class="px-5 sm:px-6 py-4 border-t border-slate-100 flex items-center gap-3">
+                    <button type="button" onclick="closeProductSheet()"
+                            class="h-11 px-4 rounded-xl text-slate-700 hover:bg-slate-100 text-sm font-semibold">
+                        Cancel
+                    </button>
+                    <button type="submit" id="add-product-submit-btn"
+                            class="flex-1 h-11 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-sm flex items-center justify-center gap-2 disabled:opacity-60">
+                        <span id="add-product-submit-label">Add to catalog</span>
+                        <i id="add-product-submit-icon" class="fa-solid fa-arrow-right text-xs"></i>
+                    </button>
+                </div>
+            </form>
+        </section>
+    </div>
+
     <!-- Camera Scanner Modal (Redesigned with Premium Tailwind CSS) -->
-    <div id="scanner-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md hidden">
-        <div class="bg-white rounded-3xl max-w-lg w-full mx-4 shadow-2xl overflow-hidden border border-slate-100 flex flex-col transform transition-all duration-300">
+    <div id="scanner-modal" data-modal data-on-dismiss="closeScannerModal" role="dialog" aria-modal="true" aria-labelledby="scanner-modal-title"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md hidden">
+        <div data-modal-panel tabindex="-1" class="bg-white rounded-3xl max-w-lg w-full mx-4 shadow-2xl overflow-hidden border border-slate-100 flex flex-col">
             <!-- Modal Header -->
             <div class="bg-slate-50 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                 <div class="flex items-center space-x-2.5">
                     <div class="bg-gradient-to-tr from-amber-500 to-orange-400 text-white p-1.5 rounded-xl shadow-md shadow-orange-100">
-                        <i class="fa-solid fa-camera text-md"></i>
+                        <i class="fa-solid fa-camera text-base"></i>
                     </div>
-                    <h3 class="text-md font-extrabold text-slate-900">Live Camera Scanner</h3>
+                    <h3 id="scanner-modal-title" class="text-base font-extrabold text-slate-900">Live Camera Scanner</h3>
                 </div>
-                <button onclick="closeScannerModal()" class="text-slate-400 hover:text-slate-600 transition p-2 hover:bg-slate-100 rounded-xl">
+                <button type="button" onclick="closeScannerModal()" aria-label="Close scanner" class="text-slate-400 hover:text-slate-600 transition p-2 hover:bg-slate-100 rounded-xl">
                     <i class="fa-solid fa-xmark text-lg"></i>
                 </button>
             </div>
 
             <!-- Glassmorphic Modal Tabs -->
             <div class="flex border-b border-slate-100 bg-slate-50/50 p-1 gap-1">
-                <button id="tab-barcode" onclick="switchScannerTab('barcode')" class="flex-1 py-3 text-xs font-bold border-b-2 border-indigo-600 text-indigo-600 flex items-center justify-center space-x-2 focus:outline-none rounded-xl bg-white shadow-sm border border-slate-100">
-                    <i class="fa-solid fa-barcode text-md"></i>
+                <button id="tab-barcode" onclick="switchScannerTab('barcode')" class="flex-1 py-3 text-xs font-bold border-b-2 border-indigo-600 text-indigo-600 flex items-center justify-center space-x-2 rounded-xl bg-white shadow-sm border border-slate-100">
+                    <i class="fa-solid fa-barcode text-base"></i>
                     <span>Product Barcode (1D)</span>
                 </button>
-                <button id="tab-qrcode" onclick="switchScannerTab('qrcode')" class="flex-1 py-3 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100/80 transition flex items-center justify-center space-x-2 focus:outline-none rounded-xl">
-                    <i class="fa-solid fa-qrcode text-md"></i>
+                <button id="tab-qrcode" onclick="switchScannerTab('qrcode')" class="flex-1 py-3 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100/80 transition flex items-center justify-center space-x-2 rounded-xl">
+                    <i class="fa-solid fa-qrcode text-base"></i>
                     <span>QR Code (2D)</span>
                 </button>
-                <button id="tab-usb" onclick="switchScannerTab('usb')" class="flex-1 py-3 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100/80 transition flex items-center justify-center space-x-2 focus:outline-none rounded-xl">
-                    <i class="fa-solid fa-keyboard text-md"></i>
+                <button id="tab-usb" onclick="switchScannerTab('usb')" class="flex-1 py-3 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100/80 transition flex items-center justify-center space-x-2 rounded-xl">
+                    <i class="fa-solid fa-keyboard text-base"></i>
                     <span>USB Scanner</span>
                 </button>
             </div>
@@ -301,7 +451,7 @@
                     <div id="barcode-interactive" class="w-full h-full"></div>
                     <!-- Animated Viewfinder Reticle -->
                     <div class="absolute inset-0 border-[3px] border-indigo-500/20 m-6 rounded-2xl pointer-events-none flex flex-col items-center justify-center">
-                        <div class="w-full h-[2px] bg-gradient-to-r from-transparent via-indigo-500 to-transparent shadow-lg shadow-indigo-500/50 animate-pulse"></div>
+                        <div class="w-full h-[2px] bg-gradient-to-r from-transparent via-indigo-500 to-transparent shadow-lg shadow-indigo-500/50 motion-safe:animate-pulse"></div>
                     </div>
                     <div class="absolute bottom-4 left-0 right-0 text-center">
                         <span class="bg-slate-900/95 text-slate-300 text-[10px] font-bold px-3 py-1.5 rounded-xl border border-slate-800 shadow-md">
@@ -333,10 +483,68 @@
         </div>
     </div>
 
-    <!-- Simple Toast placeholder for HTMX error trigger -->
-    <div id="toast-container" class="fixed bottom-5 right-5 z-50 space-y-2"></div>
+    <!-- Image Confirmation Modal: shown before an image (uploaded or AI-generated) is attached to a
+         product - for a new product this gates the actual "Add to Catalog" submission; for an
+         existing product's "Generate/Regenerate Image" button it gates saving the replacement image. -->
+    <div id="image-confirm-modal" data-modal data-on-dismiss="closeImageConfirmModal" role="dialog" aria-modal="true" aria-labelledby="image-confirm-title"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md hidden">
+        <div data-modal-panel tabindex="-1" class="bg-white rounded-3xl max-w-md w-full mx-4 shadow-2xl overflow-hidden border border-slate-100 flex flex-col">
+            <div class="bg-slate-50 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <div class="flex items-center space-x-2.5">
+                    <div class="bg-gradient-to-tr from-indigo-600 to-violet-500 text-white p-1.5 rounded-xl shadow-md shadow-indigo-100">
+                        <i class="fa-solid fa-image text-base"></i>
+                    </div>
+                    <h3 id="image-confirm-title" class="text-base font-extrabold text-slate-900">Confirm Image</h3>
+                </div>
+                <button type="button" onclick="closeImageConfirmModal()" aria-label="Close" class="text-slate-400 hover:text-slate-600 transition p-2 hover:bg-slate-100 rounded-xl">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
 
+            <div class="p-6 space-y-4">
+                <div id="image-confirm-preview-wrap" class="relative bg-slate-100 rounded-2xl overflow-hidden aspect-square border border-slate-200 flex items-center justify-center">
+                    <img id="image-confirm-preview" class="w-full h-full object-cover hidden" alt="Image to confirm">
+                    <div id="image-confirm-spinner" class="hidden flex-col items-center space-y-2 text-slate-400">
+                        <i class="fa-solid fa-circle-notch fa-spin text-2xl"></i>
+                        <span class="text-xs font-bold">Generating image...</span>
+                    </div>
+                    <div id="image-confirm-error" class="hidden flex-col items-center space-y-2 text-rose-500 px-6 text-center">
+                        <i class="fa-solid fa-triangle-exclamation text-2xl"></i>
+                        <span id="image-confirm-error-text" class="text-xs font-bold"></span>
+                    </div>
+                </div>
+                <p id="image-confirm-hint" class="text-xs text-slate-500 text-center">Is this image okay to use?</p>
+            </div>
+
+            <div class="px-6 pb-6 flex items-center gap-2">
+                <button id="image-confirm-regenerate-btn" onclick="handleRegenerateClick()"
+                        class="flex-1 py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center justify-center space-x-1.5">
+                    <i class="fa-solid fa-rotate text-xs"></i>
+                    <span>Regenerate</span>
+                </button>
+                <button id="image-confirm-cancel-btn" onclick="closeImageConfirmModal()"
+                        class="flex-1 py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition">
+                    Cancel
+                </button>
+                <button id="image-confirm-use-btn" onclick="handleConfirmImageClick()"
+                        class="flex-1 py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition shadow-md shadow-indigo-100 flex items-center justify-center space-x-1.5">
+                    <i class="fa-solid fa-check text-xs"></i>
+                    <span id="image-confirm-use-label">Use this image</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Simple Toast placeholder for HTMX error trigger -->
+    <div id="toast-container" class="fixed bottom-5 right-5 left-5 sm:left-auto z-50 space-y-2 flex flex-col items-end pointer-events-none [&>*]:pointer-events-auto" aria-live="polite"></div>
+
+    <!-- Shared motion layer (springs, toasts, modals) - must load before the scripts that use it -->
+    <script th:src="@{/js/ui-motion.js}"></script>
     <!-- Scanner Script Link -->
     <script th:src="@{/js/scanner.js}"></script>
+    <!-- Product Image (upload preview / source toggle) Script Link -->
+    <script th:src="@{/js/product-image.js}"></script>
+    <!-- Page layout glue: New Product sheet, search, cart -->
+    <script th:src="@{/js/catalog-page.js}"></script>
 </body>
 </html>

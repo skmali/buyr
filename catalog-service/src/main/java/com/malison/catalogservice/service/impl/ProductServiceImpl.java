@@ -9,6 +9,7 @@ import com.malison.catalogservice.model.external.UpcItemDbResponse;
 import com.malison.catalogservice.repository.ProductRepository;
 import com.malison.catalogservice.service.ProductService;
 import com.malison.catalogservice.pubsub.ProductMessagePublisher;
+import com.malison.catalogservice.repository.ProductImageRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,16 +24,19 @@ import static org.springframework.beans.BeanUtils.*;
 public class ProductServiceImpl implements ProductService {
 
     private final ProductRepository productRepository;
+    private final ProductImageRepository productImageRepository;
     private final ProductMessagePublisher productMessagePublisher;
     private final RestTemplate restTemplate;
     private final String upcLookupUrl;
 
     @Autowired
     public ProductServiceImpl(ProductRepository productRepository,
+                               ProductImageRepository productImageRepository,
                                ProductMessagePublisher productMessagePublisher,
                                RestTemplate restTemplate,
                                @Value("${upc-lookup.url:https://api.upcitemdb.com/prod/trial/lookup}") String upcLookupUrl) {
         this.productRepository = productRepository;
+        this.productImageRepository = productImageRepository;
         this.productMessagePublisher = productMessagePublisher;
         this.restTemplate = restTemplate;
         this.upcLookupUrl = upcLookupUrl;
@@ -69,6 +73,7 @@ public class ProductServiceImpl implements ProductService {
                 new ProductServiceException("Product with id: " + id + " not found", "PRODUCT_NOT_FOUND"));
         ProductResponse productResponse = new ProductResponse();
         copyProperties(product, productResponse);
+        productResponse.setHasImage(productImageRepository.existsById(id));
         return productResponse;
     }
 
@@ -79,6 +84,7 @@ public class ProductServiceImpl implements ProductService {
                 .map(product -> {
                     ProductResponse response = new ProductResponse();
                     copyProperties(product, response);
+                    response.setHasImage(productImageRepository.existsById(product.getId()));
                     return response;
                 })
                 .collect(java.util.stream.Collectors.toList());

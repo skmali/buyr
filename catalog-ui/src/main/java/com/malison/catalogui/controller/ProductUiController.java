@@ -7,19 +7,33 @@ import com.malison.catalogui.model.OrderResponse;
 import com.malison.catalogui.model.ProductRequest;
 import com.malison.catalogui.model.ProductResponse;
 import com.malison.catalogui.model.UpcLookupResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Controller
 @RequestMapping("/")
@@ -75,19 +89,133 @@ public class ProductUiController {
     }
 
     @PostMapping("/products")
-    public String addProduct(@ModelAttribute ProductRequest request, Model model) {
+    public String addProduct(@ModelAttribute ProductRequest request,
+                              @RequestParam(value = "imageFile", required = false) MultipartFile imageFile,
+                              @RequestParam(value = "imageSource", required = false, defaultValue = "none") String imageSource,
+                              Model model,
+                              HttpServletResponse response) {
         log.info("UI request: add product through backend: {}", request);
         try {
             Long productId = restTemplate.postForObject(backendUrl, request, Long.class);
             if (productId != null) {
+                attachImage(productId, imageSource, imageFile);
                 ProductResponse product = restTemplate.getForObject(backendUrl + "/" + productId, ProductResponse.class);
                 model.addAttribute("product", product);
+                // Both outcomes return 200, so tell the page explicitly that the product was created
+                response.setHeader("HX-Trigger", "product-added");
                 return "fragments/product-row :: product-row";
             }
         } catch (Exception e) {
             log.error("Failed to add product: {}", e.getMessage());
         }
         return "fragments/product-row :: error-toast";
+    }
+
+    /**
+     * Best-effort: the product itself is already created at this point, so a failed
+     * image attach never fails the whole "add product" request - it just leaves the
+     * product without an image (card falls back to the placeholder).
+     *
+     * Normally the browser has already generated-and-confirmed (or picked-and-confirmed)
+     * the exact image bytes before this request ever fires (see product-image.js), and
+     * attaches them here as an ordinary file - tagged GENERATED or UPLOAD so CatalogService
+     * records the real provenance. The direct generate-on-server branch below is only a
+     * fallback for the (should-be-rare) case where imageSource is "generate" but no
+     * confirmed file made it into the request.
+     */
+    private void attachImage(long productId, String imageSource, MultipartFile imageFile) {
+        try {
+            if (imageFile != null && !imageFile.isEmpty()) {
+                String source = "generate".equals(imageSource) ? "GENERATED" : "UPLOAD";
+                forwardImageUpload(productId, imageFile, source);
+            } else if ("generate".equals(imageSource)) {
+                restTemplate.postForObject(backendUrl + "/" + productId + "/image/generate", null, ProductResponse.class);
+            }
+        } catch (IOException e) {
+            log.error("Failed to read uploaded image bytes for product {}: {}", productId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Failed to attach image ({}) to product {}: {}", imageSource, productId, e.getMessage());
+        }
+    }
+
+    private void forwardImageUpload(long productId, MultipartFile file, String source) throws IOException {
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("file", new ByteArrayResource(file.getBytes()) {
+            @Override
+            public String getFilename() {
+                return file.getOriginalFilename();
+            }
+        });
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+        String encodedSource = URLEncoder.encode(source, StandardCharsets.UTF_8);
+        restTemplate.postForObject(backendUrl + "/" + productId + "/image?source=" + encodedSource,
+                new HttpEntity<>(body, headers), ProductResponse.class);
+    }
+
+    /** Streams a product's image bytes from CatalogService to the browser. */
+    @GetMapping("/products/{id}/image")
+    public ResponseEntity<byte[]> productImage(@PathVariable long id) {
+        try {
+            ResponseEntity<byte[]> response = restTemplate.getForEntity(backendUrl + "/" + id + "/image", byte[].class);
+            return ResponseEntity.status(response.getStatusCode())
+                    .contentType(response.getHeaders().getContentType() != null
+                            ? response.getHeaders().getContentType() : MediaType.APPLICATION_OCTET_STREAM)
+                    .body(response.getBody());
+        } catch (Exception e) {
+            log.error("Failed to fetch image for product {}: {}", id, e.getMessage());
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * Attaches (or replaces) an existing product's image directly - used by the "Generate
+     * Image" / "Regenerate Image" button on each catalog card, after the user has confirmed
+     * the preview in the browser. Also reachable for a manual upload against an existing
+     * product, though today's UI only drives this path for confirmed AI-generated images.
+     */
+    @PostMapping("/products/{id}/image")
+    @ResponseBody
+    public ResponseEntity<String> uploadProductImage(@PathVariable long id,
+                                                       @RequestParam("file") MultipartFile file,
+                                                       @RequestParam(value = "source", required = false, defaultValue = "UPLOAD") String source) {
+        try {
+            forwardImageUpload(id, file, source);
+            return ResponseEntity.ok().build();
+        } catch (HttpStatusCodeException e) {
+            log.error("Upload image failed for product {}: {} {}", id, e.getStatusCode(), e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getStatusCode()).contentType(MediaType.APPLICATION_JSON).body(e.getResponseBodyAsString());
+        } catch (Exception e) {
+            log.error("Upload image failed for product {}: {}", id, e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).contentType(MediaType.APPLICATION_JSON).body("{\"message\":\"Failed to upload image\"}");
+        }
+    }
+
+    /**
+     * Stateless preview: generates an image from the given description without creating or
+     * touching any product. Lets the "New Product" form (and the per-card regenerate button)
+     * show the user what the AI produced and get their confirmation before it's attached
+     * anywhere.
+     */
+    @PostMapping("/products/image/generate-preview")
+    @ResponseBody
+    public ResponseEntity<byte[]> previewGeneratedImage(@RequestParam("description") String description) {
+        try {
+            Map<String, String> requestBody = Map.of("description", description == null ? "" : description);
+            ResponseEntity<byte[]> response = restTemplate.postForEntity(backendUrl + "/image/generate", requestBody, byte[].class);
+            return ResponseEntity.status(response.getStatusCode())
+                    .contentType(response.getHeaders().getContentType() != null
+                            ? response.getHeaders().getContentType() : MediaType.IMAGE_PNG)
+                    .body(response.getBody());
+        } catch (HttpStatusCodeException e) {
+            log.error("Image generation preview failed: {} {}", e.getStatusCode(), e.getResponseBodyAsString());
+            return ResponseEntity.status(e.getStatusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(e.getResponseBodyAsByteArray());
+        } catch (Exception e) {
+            log.error("Image generation preview failed: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
     }
 
     @PostMapping("/cart/add/{productId}")
