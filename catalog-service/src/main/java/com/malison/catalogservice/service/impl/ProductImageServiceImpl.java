@@ -10,6 +10,7 @@ import com.malison.catalogservice.pubsub.ProductMessagePublisher;
 import com.malison.catalogservice.repository.ProductImageRepository;
 import com.malison.catalogservice.repository.ProductRepository;
 import com.malison.catalogservice.service.ProductImageService;
+import com.malison.catalogservice.util.ImageTypeDetector;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
@@ -27,6 +28,7 @@ public class ProductImageServiceImpl implements ProductImageService {
 
     private static final long MAX_IMAGE_BYTES = 5L * 1024 * 1024; // 5 MB
     private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of("image/png", "image/jpeg", "image/webp");
+    private static final Set<String> ALLOWED_SOURCES = Set.of("UPLOAD", "GENERATED");
 
     private final ProductRepository productRepository;
     private final ProductImageRepository productImageRepository;
@@ -46,7 +48,7 @@ public class ProductImageServiceImpl implements ProductImageService {
 
     @Override
     @CacheEvict(value = "product", key = "#productId")
-    public void uploadImage(long productId, MultipartFile file) {
+    public void uploadImage(long productId, MultipartFile file, String source) {
         requireProductExists(productId);
 
         if (file == null || file.isEmpty()) {
@@ -64,14 +66,15 @@ public class ProductImageServiceImpl implements ProductImageService {
         }
 
         // Never trust the client-supplied Content-Type header alone - sniff the real format from the bytes.
-        String sniffedType = sniffContentType(bytes);
+        String sniffedType = ImageTypeDetector.detect(bytes);
         if (sniffedType == null || !ALLOWED_CONTENT_TYPES.contains(sniffedType)) {
             throw new ImageServiceException(
                     "Unsupported image format - only PNG, JPEG, and WebP are allowed", "INVALID_IMAGE", HttpStatus.BAD_REQUEST);
         }
 
-        saveImage(productId, bytes, sniffedType, "UPLOAD");
-        log.info("Stored uploaded image for product ID: {} ({} bytes, {})", productId, bytes.length, sniffedType);
+        String resolvedSource = ALLOWED_SOURCES.contains(source) ? source : "UPLOAD";
+        saveImage(productId, bytes, sniffedType, resolvedSource);
+        log.info("Stored {} image for product ID: {} ({} bytes, {})", resolvedSource, productId, bytes.length, sniffedType);
     }
 
     @Override
@@ -80,30 +83,9 @@ public class ProductImageServiceImpl implements ProductImageService {
         Product product = productRepository.findById(productId).orElseThrow(() ->
                 new ProductServiceException("Product with id: " + productId + " not found", "PRODUCT_NOT_FOUND"));
 
-        String description = product.getDescription();
-        if (description == null || description.isBlank()) {
-            throw new ImageServiceException(
-                    "Product has no description to generate an image from", "IMAGE_GENERATION_FAILED", HttpStatus.BAD_REQUEST);
-        }
+        byte[] bytes = generateFromDescription(product.getDescription());
 
-        if (!imageGenerationClient.isConfigured()) {
-            throw new ImageServiceException(
-                    "Image generation is not configured on this server (missing API key)",
-                    "IMAGE_GENERATION_NOT_CONFIGURED", HttpStatus.SERVICE_UNAVAILABLE);
-        }
-
-        String prompt = "Product photo of: " + truncate(description, 800);
-
-        byte[] bytes;
-        try {
-            bytes = imageGenerationClient.generate(prompt);
-        } catch (ImageGenerationException e) {
-            log.error("Image generation failed for product ID {}: {}", productId, e.getMessage());
-            throw new ImageServiceException(
-                    "Image generation failed: " + e.getMessage(), "IMAGE_GENERATION_FAILED", HttpStatus.BAD_GATEWAY);
-        }
-
-        String contentType = sniffContentType(bytes);
+        String contentType = ImageTypeDetector.detect(bytes);
         if (contentType == null) {
             contentType = "image/png"; // providers return valid images; default if sniffing is inconclusive
         }
@@ -113,9 +95,37 @@ public class ProductImageServiceImpl implements ProductImageService {
     }
 
     @Override
+    public byte[] previewGenerate(String description) {
+        return generateFromDescription(description);
+    }
+
+    @Override
     public ProductImage getImage(long productId) {
         return productImageRepository.findById(productId).orElseThrow(() ->
                 new ImageServiceException("No image found for product " + productId, "IMAGE_NOT_FOUND", HttpStatus.NOT_FOUND));
+    }
+
+    /** Shared by both the persisted (per-product) and stateless (preview) generation paths. */
+    private byte[] generateFromDescription(String description) {
+        if (description == null || description.isBlank()) {
+            throw new ImageServiceException(
+                    "A description is required to generate an image", "IMAGE_GENERATION_FAILED", HttpStatus.BAD_REQUEST);
+        }
+
+        if (!imageGenerationClient.isConfigured()) {
+            throw new ImageServiceException(
+                    "Image generation is not configured on this server (missing API key)",
+                    "IMAGE_GENERATION_NOT_CONFIGURED", HttpStatus.SERVICE_UNAVAILABLE);
+        }
+
+        String prompt = "Product photo of: " + truncate(description, 800);
+        try {
+            return imageGenerationClient.generate(prompt);
+        } catch (ImageGenerationException e) {
+            log.error("Image generation failed: {}", e.getMessage());
+            throw new ImageServiceException(
+                    "Image generation failed: " + e.getMessage(), "IMAGE_GENERATION_FAILED", HttpStatus.BAD_GATEWAY);
+        }
     }
 
     private void requireProductExists(long productId) {
@@ -139,37 +149,6 @@ public class ProductImageServiceImpl implements ProductImageService {
         } catch (Exception e) {
             log.error("Failed to publish image update to Redis: {}", e.getMessage());
         }
-    }
-
-    /** Sniffs the real image format from its magic bytes; returns null if none of the allowed formats match. */
-    private static String sniffContentType(byte[] bytes) {
-        if (bytes == null) {
-            return null;
-        }
-        if (startsWith(bytes, 0x89, 0x50, 0x4E, 0x47)) {
-            return "image/png";
-        }
-        if (startsWith(bytes, 0xFF, 0xD8, 0xFF)) {
-            return "image/jpeg";
-        }
-        if (bytes.length >= 12
-                && startsWith(bytes, 'R', 'I', 'F', 'F')
-                && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P') {
-            return "image/webp";
-        }
-        return null;
-    }
-
-    private static boolean startsWith(byte[] bytes, int... signature) {
-        if (bytes.length < signature.length) {
-            return false;
-        }
-        for (int i = 0; i < signature.length; i++) {
-            if ((bytes[i] & 0xFF) != (signature[i] & 0xFF)) {
-                return false;
-            }
-        }
-        return true;
     }
 
     private static String truncate(String value, int maxLength) {

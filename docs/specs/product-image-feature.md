@@ -35,14 +35,19 @@ on the catalog card and the image persisted so it survives restarts.
 
 **In scope**
 - Single image per product (no galleries).
-- Manual upload (JPEG/PNG/WebP) on product creation.
-- AI-generated image from `description` on product creation.
+- Manual upload (JPEG/PNG/WebP) on product creation, with the user
+  confirming the exact image before the product is saved (v1.1, §5.6).
+- AI-generated image from `description`, on product creation **and**
+  for an already-existing product (v1.1 - see below), both gated behind
+  the same preview-and-confirm step before anything is persisted.
 - Serving/display of the image on the catalog UI.
-- Replacing an image is **not** required for v1 (products have no edit
-  flow today — only create). Noted as a follow-up in §9.
 
-**Out of scope (v1)**
-- Editing/replacing the image of an existing product.
+**Out of scope**
+- ~~Editing/replacing the image of an existing product~~ - **v1.1
+  narrows this**: *regenerating* an existing product's image via AI is
+  now supported (the wand button on each card). Manually *uploading* a
+  replacement photo for an existing product is still not wired into the
+  UI, even though the backend endpoint would support it.
 - Multiple images / image galleries.
 - Content moderation pipeline beyond basic provider-side safety filters.
 - Image CDN / external object storage (S3, etc.) — see §5.3 for why.
@@ -134,13 +139,15 @@ Options considered:
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/product` | *(existing, unchanged)* creates the product row, no image yet |
-| `POST` | `/api/product/{id}/image` | Upload: `multipart/form-data`, field `file`. Validates type/size (§7), stores as `ProductImage`, sets `hasImage=true`. |
-| `POST` | `/api/product/{id}/image/generate` | Generate: no body (uses the product's stored `description`). Calls the AI image provider (§5.5), stores result as `ProductImage` with `source=GENERATED`. |
-| `GET` | `/api/product/{id}/image` | Streams the bytes with the stored `Content-Type`. `404` if no image. `Cache-Control: max-age=3600` since images are immutable once set in v1. |
+| `POST` | `/api/product/{id}/image?source=UPLOAD\|GENERATED` | Upload/attach: `multipart/form-data`, field `file`. Validates type/size (§7), stores as `ProductImage`, sets `hasImage=true`. `source` (added in v1.1, default `UPLOAD`) just records provenance - see §5.6. |
+| `POST` | `/api/product/{id}/image/generate` | Generate-and-persist directly against a product (uses its stored `description`). Still used as a fallback if the client-side confirm flow (§5.6) can't run for some reason; the UI itself no longer calls this on the happy path. |
+| `POST` | `/api/product/image/generate` *(v1.1)* | **Stateless preview**: body `{"description": "..."}`, returns image bytes directly - no product id, no persistence. This is what makes the confirm-before-save flow in §5.6 possible. |
+| `GET` | `/api/product/{id}/image` | Streams the bytes with the stored `Content-Type`. `404` if no image. `Cache-Control: max-age=3600` since an image, once set, isn't expected to change out from under that cached response - a replacement (§5.6) is served from a different byte sequence, and the UI cache-busts the URL when it knows one just happened. |
 
-Both image-write endpoints evict the `product` Redis cache key for that
-id (same pattern `reduceQuantity` already uses), since `hasImage` on
-`ProductResponse` changes.
+The two image-write endpoints evict the `product` Redis cache key for
+that id (same pattern `reduceQuantity` already uses), since `hasImage`
+on `ProductResponse` changes. The stateless preview endpoint touches no
+database row and therefore nothing to evict.
 
 ### 5.5 AI image generation
 
@@ -191,41 +198,92 @@ a config + one new class, not a redesign.)
   §9 that there's no rate limiting; acceptable for local/demo use, called
   out explicitly as a gap if this is ever exposed publicly.
 
-### 5.6 `catalog-ui` changes
+### 5.6 `catalog-ui` changes (revised in v1.1 - confirm-before-save)
 
-**Form** (`products.html`, "New Product" panel): add, below the
-description field,
+v1 shipped with image generation happening silently, server-side, right
+after product creation (the sequence diagram further down used to show
+exactly that). v1.1 replaces it with an explicit **preview-and-confirm**
+step, driven entirely client-side, before anything is persisted - the
+Open Question from §9 ("regenerate-on-submit vs. reuse preview bytes")
+is now resolved in favor of the latter: generate once, show it, let the
+user accept or regenerate, and submit the *exact* confirmed bytes.
 
-- A file input (`<input type="file" name="imageFile" accept="image/png,image/jpeg,image/webp">`) for upload, with a small live `<img>` preview (plain JS `FileReader`, no new JS deps needed since `scanner.js` already does similar canvas/DOM work).
-- A **"Generate from description"** button (disabled until `description` is non-empty) that calls the new proxy endpoint and swaps in a preview `<img>`, with a spinner while the HTMX request is in flight (`hx-indicator`, same mechanism already usable with HTMX).
-- Only one of the two image sources applies per product; picking one clears/disables the other in the form (simple JS toggle, same style as `scanner.js`'s tab switching).
+**Form** (`products.html`, "New Product" panel): the image-source radio
+group (`none` / `upload` / `generate`) is unchanged, but neither path
+attaches anything automatically on submit anymore:
 
-**Submit flow**: product creation becomes two requests from
-`ProductUiController.addProduct`, in sequence, mirroring how
-`checkout()` already does multi-step orchestration:
-1. `POST` the product fields to `catalog-service` (unchanged, returns `id`).
-2. If an image file was attached: `POST multipart/form-data` to
-   `/api/product/{id}/image`. If "Generate" was used instead: `POST`
-   to `/api/product/{id}/image/generate` (re-running generation server
-   side so the final stored image is authoritative — the form preview
-   from step 5.6 is just a UX preview, not necessarily byte-identical,
-   unless we instead submit the already-previewed bytes; see Open
-   Question in §9).
-3. Return the `product-row` fragment as today — now rendering an `<img>`.
+- `upload`: file input + live `FileReader` preview, same as v1.
+- `generate`: no in-form preview button - clicking the form's own **"Add
+  to Catalog"** button is what triggers generation now (see below).
+- The submit button is a plain `type="button"` (not `type="submit"`),
+  and the `<form>` only reacts to a custom `confirmed-submit` event
+  (`hx-trigger="confirmed-submit"`, with `onsubmit="return false"` as a
+  belt-and-suspenders block on the browser's native Enter-to-submit).
+  `handleAddToCatalogClick()` in `product-image.js` is the real entry
+  point: it runs `form.reportValidity()` first (so required-field
+  validation still works without a native submit button), then branches
+  on the selected image source.
 
-New UI proxy endpoints (same pass-through pattern as `lookupUpc`):
-- `POST /products/{id}/image` (upload passthrough)
-- `POST /products/{id}/image/generate` (generate passthrough)
-- `GET /products/{id}/image` (stream passthrough — the browser's `<img src>` hits this, which proxies bytes from `catalog-service`; keeps the browser never talking to `catalog-service` directly, consistent with every other feature).
+**The confirmation modal** (`#image-confirm-modal`, new markup styled
+like the existing scanner modal) is shared by two call sites:
 
-**Product card** (`fragments/product-row.html`): add an `<img>` above
-the title, `th:src="@{'/products/' + ${product.id} + '/image'}"`, with an
-`onerror` fallback to a static placeholder
-(`/img/placeholder-product.png`, new static asset) so a product created
-before this feature — or one whose generation failed — still renders
-cleanly.
+1. **New product, source = upload**: shows the already-selected file's
+   preview immediately (no network call) with Confirm/Cancel (no
+   Regenerate - there's nothing to regenerate for a manually chosen file).
+2. **New product, source = generate**: calls the stateless
+   `POST /products/image/generate-preview` proxy (§5.4) with the
+   description, shows a spinner, then the result, with
+   Confirm/Regenerate/Cancel. Confirm is disabled until there's an
+   actual image to confirm (including after a failed generation - the
+   button doesn't silently re-enable with nothing behind it).
+3. **Existing product, "Generate/Regenerate Image" button** on each
+   catalog card (new in v1.1, see below) reuses the identical modal.
 
-## 6. Sequence (generate-from-description path)
+On **Confirm**:
+- *create-upload*: the file is already sitting in the form's hidden
+  `#imageFile` input - just dispatch `confirmed-submit`.
+- *create-generate*: the previewed blob is wrapped as a `File` and
+  injected into that same `#imageFile` input via the `DataTransfer` API,
+  then `confirmed-submit` is dispatched. Either way,
+  `ProductUiController.addProduct` now does one thing with images,
+  not two: if a file is present, forward it to
+  `POST /api/product/{id}/image?source=UPLOAD|GENERATED` (source tagged
+  from which radio was selected, for provenance only - see §5.2). The
+  old "call `/image/generate` directly after creation" branch is kept
+  only as a defensive fallback for the (should-be-rare) case where
+  `generate` was selected but no confirmed file made it into the
+  request.
+- *existing-generate* (regenerating an existing product's image): the
+  browser itself calls `POST /products/{id}/image?source=GENERATED`
+  directly (no page reload) via `fetch`, then cache-busts that card's
+  `<img src>` (`?t=<timestamp>`) to show the new image immediately.
+
+**Existing products** (new in v1.1): every catalog card gets a small
+wand-icon button overlaid on its image (`product-row.html`), labeled via
+its `title` attribute ("Generate Image" / "Regenerate Image" depending
+on `hasImage`). It carries the product's id/name/description as `data-*`
+attributes (Thymeleaf-escaped) and calls `regenerateProductImage(this)`,
+which opens the same confirmation modal pre-loaded with a preview
+generated from that product's existing description. This directly
+supersedes the "editing an existing product's image is out of scope"
+line from §3/§9 - regenerating is now supported; manually *uploading* a
+replacement for an existing product is not yet wired into the UI (the
+backend endpoint supports it - §5.4 - just nothing calls it that way).
+
+**Product card** (`fragments/product-row.html`): the `<img>` (with
+`id="product-image-{id}"` for the regenerate button's cache-busting, and
+the same placeholder-on-error fallback as v1) now sits inside a
+`position: relative` wrapper alongside the generate/regenerate button.
+
+New/changed UI proxy endpoints on `ProductUiController`:
+- `POST /products/{id}/image` *(now public, not just an internal helper)* - upload/attach passthrough, used by both the create flow and the existing-product regenerate flow.
+- `POST /products/image/generate-preview` *(v1.1)* - stateless passthrough to the new preview endpoint; returns image bytes or a JSON error body (502/503/400 relayed from `catalog-service`).
+- `GET /products/{id}/image` - unchanged, stream passthrough.
+- `POST /products/{id}/image/generate` - unchanged, kept only as the server-side fallback described above.
+
+## 6. Sequences
+
+**New product, generate-from-description (confirm-first, v1.1):**
 
 ```mermaid
 sequenceDiagram
@@ -234,20 +292,44 @@ sequenceDiagram
     participant Catalog as catalog-service
     participant AI as Image Gen API
 
-    Browser->>UI: POST /products (name, description, price, qty)
-    UI->>Catalog: POST /api/product
-    Catalog-->>UI: 201 {id}
-    Browser->>UI: click "Generate from description"
-    UI->>Catalog: POST /api/product/{id}/image/generate
+    Browser->>UI: click "Add to Catalog" (source = generate)
+    UI->>Catalog: POST /api/product/image/generate {description}
     Catalog->>AI: generate(prompt from description)
     AI-->>Catalog: image bytes
+    Catalog-->>UI: 200 image bytes (nothing persisted yet)
+    UI-->>Browser: image bytes
+    Browser->>Browser: show in confirm modal
+    Browser->>Browser: user clicks "Use this image & add product"
+    Browser->>UI: POST /products (fields + confirmed image as file)
+    UI->>Catalog: POST /api/product -> {id}
+    UI->>Catalog: POST /api/product/{id}/image?source=GENERATED (the confirmed bytes)
     Catalog->>Catalog: store ProductImage, evict cache
     Catalog-->>UI: 200 {hasImage:true}
     UI-->>Browser: product-row fragment with <img src="/products/{id}/image">
-    Browser->>UI: GET /products/{id}/image
-    UI->>Catalog: GET /api/product/{id}/image
-    Catalog-->>UI: image bytes
-    UI-->>Browser: image bytes
+```
+
+**Existing product, "Regenerate Image" button (v1.1):**
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant UI as catalog-ui
+    participant Catalog as catalog-service
+    participant AI as Image Gen API
+
+    Browser->>UI: click wand button on a card
+    UI->>Catalog: POST /api/product/image/generate {description}
+    Catalog->>AI: generate(prompt)
+    AI-->>Catalog: image bytes
+    Catalog-->>UI: 200 image bytes
+    UI-->>Browser: show in confirm modal
+    Browser->>Browser: user clicks "Use this image"
+    Browser->>UI: POST /products/{id}/image?source=GENERATED (fetch, no reload)
+    UI->>Catalog: POST /api/product/{id}/image?source=GENERATED
+    Catalog->>Catalog: replace ProductImage, evict cache
+    Catalog-->>UI: 200
+    UI-->>Browser: 200
+    Browser->>Browser: cache-bust that card's <img src>
 ```
 
 ## 7. Non-functional requirements
@@ -260,6 +342,15 @@ sequenceDiagram
   too small — raise `spring.servlet.multipart.max-file-size` /
   `max-request-size` to `5MB` in both `catalog-service` and `catalog-ui`.
 - **Timeouts**: as noted in §5.5, bound the AI call explicitly.
+- **Rate limits (Pollinations.ai)**: the anonymous tier is documented at
+  one request every 15s; a burst of generate/regenerate calls (manual
+  testing, or a user mashing "Regenerate") returns `402 Payment
+  Required` from the provider, surfaced to the user as a normal
+  `IMAGE_GENERATION_FAILED` error with a Regenerate option - confirmed
+  working as intended during testing, not a bug. Registering a free
+  token at `auth.pollinations.ai` raises this to one request every 5s
+  (and removes the watermark - §5.5); worth doing if this limit is hit
+  in normal use.
 - **Security**: no new attack surface beyond standard file-upload
   hygiene (type/size validation, never trust the client-supplied
   `Content-Type` header alone — sniff magic bytes server-side too). API
@@ -281,22 +372,21 @@ sequenceDiagram
 
 ## 9. Open questions
 
-1. **Re-generate vs. reuse preview bytes**: should the "Generate" button
-   in the form generate once and submit those exact bytes with the
-   product (fewer AI calls, but needs temp storage before the product
-   `id` exists), or regenerate server-side after product creation as
-   described in §5.6 (simpler, costs a second AI call if the user
-   regenerated a few times while drafting)? **Recommendation**: start
-   with regenerate-on-submit (simpler); revisit if AI cost/latency is a
-   problem.
+1. ~~**Re-generate vs. reuse preview bytes**~~ — **Resolved in v1.1**:
+   reuse the confirmed preview bytes (§5.6) - the user explicitly asked
+   for a confirmation step before the product is saved, which only makes
+   sense if the bytes they confirmed are the bytes that get persisted.
+   One AI call per generate/regenerate click, not two.
 2. ~~**Which AI provider**~~ — **Resolved**: Pollinations.ai (§5.5), a
    free unauthenticated API, specifically so the feature needs no API key
    to work. Revisit if its output quality/reliability isn't good enough
    — the `ImageGenerationClient` interface makes swapping providers a
    small, contained change.
-3. **Editing an existing product's image** is explicitly out of scope
-   (§3) — confirm that's acceptable given the app has no edit flow at
-   all today.
+3. ~~**Editing an existing product's image**~~ — **Narrowed in v1.1**:
+   AI regeneration for an existing product is now supported (§5.6);
+   manual upload-replace for an existing product is still not in the UI
+   (open: worth adding if users want to upload a photo for a product
+   that only ever got an AI-generated or placeholder image).
 
 ## 10. Rollout plan
 
