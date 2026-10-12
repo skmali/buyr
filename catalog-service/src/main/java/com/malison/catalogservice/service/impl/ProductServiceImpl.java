@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import static org.springframework.beans.BeanUtils.*;
@@ -110,6 +111,27 @@ public class ProductServiceImpl implements ProductService {
             productMessagePublisher.publish("Product stock updated: [ID=" + product.getId() + ", NewStock=" + product.getQuantity() + "]");
         } catch (Exception e) {
             log.error("Failed to publish stock update to Redis: {}", e.getMessage());
+        }
+    }
+
+    @Override
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "product", key = "#id")
+    public void deleteProduct(long id) {
+        log.info("Deleting product ID: {}", id);
+        if (!productRepository.existsById(id)) {
+            throw new ProductServiceException("Product with id: " + id + " not found", "PRODUCT_NOT_FOUND");
+        }
+
+        // The image shares the product's id rather than a foreign key, so it has to go explicitly
+        productImageRepository.deleteById(id);
+        productRepository.deleteById(id);
+        log.info("Product ID: {} deleted", id);
+
+        try {
+            productMessagePublisher.publish("Product deleted: [ID=" + id + "]");
+        } catch (Exception e) {
+            log.error("Failed to publish delete message to Redis: {}", e.getMessage());
         }
     }
 

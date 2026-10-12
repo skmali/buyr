@@ -24,6 +24,7 @@ import org.springframework.ui.Model;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
@@ -216,6 +217,35 @@ public class ProductUiController {
             log.error("Image generation preview failed: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
         }
+    }
+
+    /**
+     * Deletes a product, then drops it from the cart so checkout can't order something that no
+     * longer exists. The card itself is removed in the browser on the "product-deleted" event, so a
+     * failure leaves it in place; the response only carries the refreshed cart.
+     */
+    @DeleteMapping("/products/{id}")
+    public String deleteProduct(@PathVariable long id, Model model, HttpServletResponse response) {
+        log.info("UI request: delete product {}", id);
+        try {
+            restTemplate.delete(backendUrl + "/" + id);
+        } catch (HttpClientErrorException.NotFound e) {
+            log.info("Product {} was already deleted", id); // the goal state is reached either way
+        } catch (Exception e) {
+            log.error("Failed to delete product {}: {}", id, e.getMessage());
+            model.addAttribute("errorDetail", "The product couldn't be deleted. Please try again.");
+            return "fragments/product-row :: error-toast";
+        }
+
+        try {
+            restTemplate.delete(cartServiceUrl + "/" + CART_ID + "/remove/" + id);
+        } catch (Exception e) {
+            log.error("Product {} deleted but could not be removed from the cart: {}", id, e.getMessage());
+        }
+
+        response.setHeader("HX-Trigger", "{\"product-deleted\": {\"id\": " + id + "}}");
+        model.addAttribute("cart", getCartFromService());
+        return "fragments/product-row :: product-deleted-response";
     }
 
     @PostMapping("/cart/add/{productId}")

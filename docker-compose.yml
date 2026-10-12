@@ -45,6 +45,9 @@ services:
 
   catalog-service:
     image: skmali/catalog-service:latest
+    build:
+      context: .
+      dockerfile: catalog-service/Dockerfile
     container_name: buyr-catalog-service
     environment:
       EUREKA_SERVER_ADDRESS: http://service-registry:8761/eureka

@@ -237,7 +237,7 @@
                 </div>
 
                 <!-- Empty catalog: say what to do next, and offer the action right here -->
-                <div th:if="${#lists.isEmpty(products)}" id="empty-catalog-state" class="text-center py-16 px-6 bg-white border border-dashed border-slate-300 rounded-2xl">
+                <div id="empty-catalog-state" th:classappend="${#lists.isEmpty(products)} ? '' : 'hidden'" class="text-center py-16 px-6 bg-white border border-dashed border-slate-300 rounded-2xl">
                     <div class="w-14 h-14 bg-indigo-50 text-indigo-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
                         <i class="fa-solid fa-box-open text-xl"></i>
                     </div>
