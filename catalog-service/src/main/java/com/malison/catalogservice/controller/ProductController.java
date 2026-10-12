@@ -57,6 +57,12 @@ public class ProductController {
         return new ResponseEntity<>(HttpStatus.OK);
     }
 
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteProduct(@PathVariable("id") Long id) {
+        productService.deleteProduct(id);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/lookup-upc/{code}")
     public ResponseEntity<UpcLookupResponse> lookupUpc(@PathVariable("code") String code) {
         UpcLookupResponse result = productService.lookupUpc(code);

@@ -152,13 +152,15 @@ function syncCartBadge() {
 document.addEventListener("htmx:afterSwap", syncCartBadge);
 syncCartBadge();
 
-// Placing an order can't be undone, so the first press arms the button and the second commits.
+// For actions that can't be undone (placing an order, deleting a product): the first press arms
+// the button and the second commits by firing "confirmed", which the button's hx-trigger listens for.
 // The armed state reverts on its own if the user walks away.
-function confirmPlaceOrder(button) {
+function confirmAction(button) {
     const label = button.querySelector("[data-label]");
     if (button.dataset.confirming === "true") {
         clearTimeout(button._confirmTimer);
         delete button.dataset.confirming;
+        label.textContent = button._originalLabel;
         htmx.trigger(button, "confirmed");
         return;
     }
@@ -170,6 +172,44 @@ function confirmPlaceOrder(button) {
         label.textContent = button._originalLabel;
     }, 4000);
 }
+
+// ---- Delete product ----
+
+// Sent by the server (HX-Trigger) only once the product is really gone, so the card stays put on failure
+document.body.addEventListener("product-deleted", (e) => {
+    const card = document.getElementById(`product-card-${e.detail.id}`);
+    if (!card) {
+        return;
+    }
+    // Cards rendered with the page sit in a wrapper div; cards added later are direct grid children
+    const cell = card.closest("#product-grid-container > div") || card;
+    const name = ((card.querySelector("h3") || {}).textContent || "").trim();
+
+    let finished = false;
+    const finish = () => {
+        if (finished) return;
+        finished = true;
+        cell.remove();
+        filterProducts();
+        const emptyState = document.getElementById("empty-catalog-state");
+        if (emptyState) {
+            emptyState.classList.toggle("hidden", document.querySelectorAll("#product-grid-container > div").length > 0);
+        }
+        showToast(name ? `"${name}" deleted.` : "Product deleted.", "success");
+    };
+
+    if (UiMotion.reducedMotion.matches) {
+        finish();
+        return;
+    }
+    cell.style.pointerEvents = "none";
+    cell.animate(
+        [{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(0.94)" }],
+        { duration: 200, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" }
+    ).finished.then(finish, finish);
+    // Animation promises wait for a rendered frame, which never comes in a background tab
+    setTimeout(finish, 300);
+});
 
 // After a new product is swapped into the grid, the count (and any active filter) needs a refresh
 document.addEventListener("htmx:afterSwap", (e) => {

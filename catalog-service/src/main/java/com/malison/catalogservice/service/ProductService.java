@@ -15,4 +15,7 @@ public interface ProductService {
     void reduceQuantity(long id, int quantity);
 
     UpcLookupResponse lookupUpc(String code);
+
+    /** Deletes the product and its image. Orders keep their own copy of the price, so they are unaffected. */
+    void deleteProduct(long id);
 }

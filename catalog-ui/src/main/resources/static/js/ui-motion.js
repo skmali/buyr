@@ -446,12 +446,12 @@
         syncHeader();
     }
 
-    // ---- Catalog: the empty state goes away as soon as the first product lands ----
+    // ---- Catalog: the empty state hides as soon as a product lands (deleting the last one shows it again) ----
 
     document.addEventListener("htmx:afterSwap", (e) => {
         if (e.detail.target && e.detail.target.id === "product-grid-container") {
             const emptyState = document.getElementById("empty-catalog-state");
-            if (emptyState) emptyState.remove();
+            if (emptyState) emptyState.classList.add("hidden");
         }
     });
 

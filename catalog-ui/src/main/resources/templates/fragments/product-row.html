@@ -12,19 +12,36 @@
              class="w-full h-full object-cover"
              th:alt="${product.name}">
 
-        <!-- Generate/Regenerate Image button: previews an AI-generated image and asks for
-             confirmation before replacing this product's image (see product-image.js).
-             On devices with hover it stays out of the way until the card is hovered or focused. -->
-        <button type="button"
-                th:attr="data-product-id=${product.id}"
-                th:data-description="${product.description}"
-                th:data-name="${product.name}"
-                th:title="${product.hasImage} ? 'Regenerate image' : 'Generate image'"
-                th:aria-label="${product.hasImage} ? 'Regenerate image' : 'Generate image'"
-                onclick="regenerateProductImage(this)"
-                class="absolute top-3 right-3 w-9 h-9 flex items-center justify-center rounded-full bg-white/85 hover:bg-white text-slate-700 hover:text-indigo-600 shadow-sm backdrop-blur [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100">
-            <i class="fa-solid fa-wand-magic-sparkles text-sm"></i>
-        </button>
+        <!-- Card actions. On devices with hover they stay out of the way until the card is hovered
+             or focused, and stay visible while a delete is armed. -->
+        <div class="absolute top-3 right-3 flex items-center gap-2 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-within:opacity-100 has-[[data-confirming=true]]:opacity-100">
+            <!-- Delete: first press arms it, second press deletes (see confirmAction) -->
+            <button type="button"
+                    th:hx-delete="'/products/' + ${product.id}"
+                    hx-trigger="confirmed"
+                    hx-swap="none"
+                    onclick="confirmAction(this)"
+                    data-confirm-label="Delete"
+                    title="Delete product"
+                    th:aria-label="'Delete ' + ${product.name}"
+                    class="h-9 min-w-[2.25rem] px-2.5 flex items-center justify-center gap-1.5 rounded-full bg-white/85 hover:bg-white text-slate-700 hover:text-rose-600 data-[confirming=true]:bg-rose-600 data-[confirming=true]:text-white data-[confirming=true]:px-3.5 shadow-sm backdrop-blur text-sm font-semibold">
+                <i class="fa-solid fa-trash-can text-sm"></i>
+                <span data-label class="empty:hidden"></span>
+            </button>
+
+            <!-- Generate/Regenerate Image button: previews an AI-generated image and asks for
+                 confirmation before replacing this product's image (see product-image.js) -->
+            <button type="button"
+                    th:attr="data-product-id=${product.id}"
+                    th:data-description="${product.description}"
+                    th:data-name="${product.name}"
+                    th:title="${product.hasImage} ? 'Regenerate image' : 'Generate image'"
+                    th:aria-label="${product.hasImage} ? 'Regenerate image' : 'Generate image'"
+                    onclick="regenerateProductImage(this)"
+                    class="w-9 h-9 flex items-center justify-center rounded-full bg-white/85 hover:bg-white text-slate-700 hover:text-indigo-600 shadow-sm backdrop-blur">
+                <i class="fa-solid fa-wand-magic-sparkles text-sm"></i>
+            </button>
+        </div>
 
         <!-- Stock status, in words: what matters is whether it can be bought -->
         <span th:if="${product.quantity <= 0}"
@@ -80,7 +97,7 @@
         <i class="fa-solid fa-triangle-exclamation text-rose-500 text-lg mt-0.5"></i>
         <div class="flex-1">
             <p class="text-sm font-semibold">That didn't work</p>
-            <p class="text-sm text-slate-500 mt-0.5">A backend service didn't respond. Your form is unchanged, so you can try again.</p>
+            <p class="text-sm text-slate-500 mt-0.5" th:text="${errorDetail} ?: 'A backend service didn\'t respond. Your form is unchanged, so you can try again.'">A backend service didn't respond.</p>
         </div>
         <button type="button" onclick="this.parentElement.remove()" aria-label="Dismiss notification" class="text-slate-400 hover:text-slate-600 transition">
             <i class="fa-solid fa-xmark"></i>
@@ -151,13 +168,13 @@
             <span class="text-xl font-bold tracking-tight text-slate-900 tabular-nums" th:text="'$' + ${#numbers.formatDecimal(total, 1, 2)}">$0.00</span>
         </div>
 
-        <!-- First press arms the button, second press places the order (see confirmPlaceOrder) -->
+        <!-- First press arms the button, second press places the order (see confirmAction) -->
         <button type="button"
                 hx-post="/cart/checkout"
                 hx-trigger="confirmed"
                 hx-target="#toast-container"
                 hx-swap="none"
-                onclick="confirmPlaceOrder(this)"
+                onclick="confirmAction(this)"
                 th:data-confirm-label="'Confirm order · $' + ${#numbers.formatDecimal(total, 1, 2)}"
                 class="w-full h-11 bg-indigo-600 hover:bg-indigo-700 data-[confirming=true]:bg-emerald-600 data-[confirming=true]:hover:bg-emerald-700 text-white text-sm font-semibold rounded-xl shadow-sm flex items-center justify-center gap-2">
             <i class="fa-solid fa-lock text-xs"></i>
@@ -226,4 +243,11 @@
             </button>
         </div>
     </div>
+</div>
+
+<!-- Response to deleting a product: the card is removed client-side on the "product-deleted"
+     event; this only refreshes the cart, since the product may have been in it -->
+<div th:fragment="product-deleted-response">
+    <div id="cart-sidebar-container" hx-swap-oob="innerHTML" th:insert="~{fragments/product-row :: cart-sidebar-content}"></div>
+    <span th:replace="~{fragments/product-row :: cart-badge}"></span>
 </div>
